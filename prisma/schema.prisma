@@ -1,0 +1,201 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum DocumentType {
+  DRIVER_LICENSE
+  PASSPORT
+  STATE_ID
+}
+
+enum AccountPrivacy {
+  PUBLIC
+  PRIVATE
+}
+
+enum UserStatus {
+  ACTIVE
+  LOCKED
+}
+
+model User {
+  id                 String         @id @default(uuid())
+  firstName          String
+  lastName           String
+  uniqueHandle       String         @unique
+  email              String         @unique
+  phoneNumber        String         @unique
+  passwordHash       String
+  dateOfBirth        DateTime?
+  addressLine1       String?
+  addressLine2       String?
+  city               String?
+  state              String?
+  zipCode            String?
+  last4Ssn           String?        @db.VarChar(4)
+  profilePicUrl      String?
+  accountPrivacy     AccountPrivacy @default(PUBLIC)
+  xUrl               String?
+  instagramUrl       String?
+  tiktokUrl          String?
+  documentType       DocumentType?
+  documentFrontUrl   String?
+  documentBackUrl    String?
+  emailVerifiedAt    DateTime?
+  phoneVerifiedAt    DateTime?
+  identityVerifiedAt DateTime?
+  signupStep         Int            @default(0)
+  status             UserStatus     @default(ACTIVE)
+  plotPoints         Int            @default(0)
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  // Relations
+  posts        Post[]
+  comments     Comment[]
+  postLikes    PostLike[]
+  commentLikes CommentLike[]
+  postShares   PostShare[]
+  followers    Follow[]      @relation("UserFollowers")
+  following    Follow[]      @relation("UserFollowing")
+}
+
+model Admin {
+  id              String    @id @default(uuid())
+  email           String    @unique
+  passwordHash    String
+  emailVerifiedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+enum OtpType {
+  EMAIL_VERIFICATION
+  PHONE_VERIFICATION
+  LOGIN_EMAIL
+  LOGIN_PHONE
+}
+
+enum OtpChannel {
+  EMAIL
+  PHONE
+}
+
+model Otp {
+  id         String     @id @default(uuid())
+  userId     String?
+  adminId    String?
+  code       String     @db.VarChar(6)
+  type       OtpType
+  channel    OtpChannel
+  expiresAt  DateTime
+  verifiedAt DateTime?
+  createdAt  DateTime   @default(now())
+
+  @@index([userId, type, verifiedAt])
+  @@index([adminId, type, verifiedAt])
+  @@index([code, expiresAt])
+}
+
+model Post {
+  id            String   @id @default(uuid())
+  userId        String
+  description   String?  @db.Text
+  mediaUrls     String[] // Array of S3 URLs for images/videos
+  likesCount    Int      @default(0)
+  commentsCount Int      @default(0)
+  sharesCount   Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user     User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  comments Comment[]
+  likes    PostLike[]
+  shares   PostShare[]
+
+  @@index([userId, createdAt])
+  @@index([createdAt])
+}
+
+model Comment {
+  id              String   @id @default(uuid())
+  postId          String
+  userId          String
+  parentCommentId String? // For nested replies
+  content         String   @db.Text
+  likesCount      Int      @default(0)
+  repliesCount    Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  post          Post          @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parentComment Comment?      @relation("CommentReplies", fields: [parentCommentId], references: [id], onDelete: Cascade)
+  replies       Comment[]     @relation("CommentReplies")
+  likes         CommentLike[]
+
+  @@index([postId, createdAt])
+  @@index([parentCommentId])
+  @@index([userId])
+}
+
+model PostLike {
+  id        String   @id @default(uuid())
+  postId    String
+  userId    String
+  createdAt DateTime @default(now())
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId])
+  @@index([postId])
+  @@index([userId])
+}
+
+model CommentLike {
+  id        String   @id @default(uuid())
+  commentId String
+  userId    String
+  createdAt DateTime @default(now())
+
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([commentId, userId])
+  @@index([commentId])
+  @@index([userId])
+}
+
+model PostShare {
+  id        String   @id @default(uuid())
+  postId    String
+  userId    String
+  createdAt DateTime @default(now())
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId])
+  @@index([postId])
+  @@index([userId])
+}
+
+model Follow {
+  id          String   @id @default(uuid())
+  followerId  String // User who follows
+  followingId String // User being followed
+  createdAt   DateTime @default(now())
+
+  follower  User @relation("UserFollowers", fields: [followerId], references: [id], onDelete: Cascade)
+  following User @relation("UserFollowing", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followingId])
+  @@index([followerId])
+  @@index([followingId])
+}
