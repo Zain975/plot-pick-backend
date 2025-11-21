@@ -10,7 +10,7 @@ COPY package*.json ./
 COPY prisma ./prisma/
 
 # Install dependencies
-RUN npm ci --only=production && npm cache clean --force
+RUN if [ -f package-lock.json ]; then npm ci --only=production; else npm install --only=production; fi && npm cache clean --force
 
 # Stage 2: Build
 FROM node:20-alpine AS build
@@ -23,7 +23,7 @@ COPY tsconfig*.json ./
 COPY prisma ./prisma/
 
 # Install all dependencies (including devDependencies for build)
-RUN npm ci && npm cache clean --force
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi && npm cache clean --force
 
 # Copy source code
 COPY src ./src
@@ -52,7 +52,7 @@ COPY package*.json ./
 COPY prisma ./prisma/
 
 # Install only production dependencies
-RUN npm ci --only=production && npm cache clean --force
+RUN if [ -f package-lock.json ]; then npm ci --only=production; else npm install --only=production; fi && npm cache clean --force
 
 # Copy built application from build stage
 COPY --from=build /app/dist ./dist
