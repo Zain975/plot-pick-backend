@@ -24,6 +24,7 @@
     "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^11.1.9",
     "@nestjs/terminus": "^11.0.0",
+    "@nestjs/mapped-types": "^2.1.0",
     "@prisma/client": "^6.19.0",
     "bcrypt": "^6.0.0",
     "class-transformer": "^0.5.1",
@@ -40,7 +41,6 @@
     "uuid": "^13.0.0"
   },
   "devDependencies": {
-    "@nestjs/mapped-types": "^2.1.0",
     "@types/bcrypt": "^6.0.0",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.5",
