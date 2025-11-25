@@ -250,7 +250,7 @@ export class AuthService {
     userImage?: any,
     documentFront?: any,
     documentBack?: any
-  ): Promise<{ user: User }> {
+  ): Promise<{ user: User; accessToken: string }> {
     try {
       const { userId, last4Ssn, documentType } = payload;
 
@@ -337,7 +337,19 @@ export class AuthService {
         },
       });
 
-      return { user: user as unknown as User };
+      // Generate JWT token for authenticated access
+      const jwtPayload: JwtPayload = {
+        sub: user.id,
+        email: user.email,
+        role: "user",
+      };
+
+      const accessToken = this.jwtService.sign(jwtPayload);
+
+      return {
+        user: user as unknown as User,
+        accessToken,
+      };
     } catch (error: any) {
       if (error instanceof HttpException) {
         throw error;
