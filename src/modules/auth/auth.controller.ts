@@ -67,6 +67,7 @@ export class AuthController {
   @Post("signup/step3")
   @UseInterceptors(
     FileFieldsInterceptor([
+      { name: "userImage", maxCount: 1 },
       { name: "frontImage", maxCount: 1 },
       { name: "backImage", maxCount: 1 },
     ])
@@ -75,6 +76,11 @@ export class AuthController {
     @Body() body: SignupStep3Dto,
     @UploadedFiles()
     files?: {
+      userImage?: Array<{
+        buffer: Buffer;
+        mimetype: string;
+        originalname: string;
+      }>;
       frontImage?: Array<{
         buffer: Buffer;
         mimetype: string;
@@ -87,10 +93,11 @@ export class AuthController {
       }>;
     }
   ) {
+    const userImage = files?.userImage?.[0];
     const frontImage = files?.frontImage?.[0];
     const backImage = files?.backImage?.[0];
 
-    return this.authService.signupStep3(body, frontImage, backImage);
+    return this.authService.signupStep3(body, userImage, frontImage, backImage);
   }
 
   @Public()

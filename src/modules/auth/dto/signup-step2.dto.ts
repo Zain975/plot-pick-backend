@@ -11,6 +11,11 @@ export class SignupStep2Dto {
   @IsNotEmpty()
   userId!: string;
 
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  phoneNumber?: string;
+
   @IsDateString()
   @IsNotEmpty()
   dateOfBirth!: string;

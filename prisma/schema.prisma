@@ -39,6 +39,7 @@ model User {
   zipCode            String?
   last4Ssn           String?        @db.VarChar(4)
   profilePicUrl      String?
+  userImage          String?
   accountPrivacy     AccountPrivacy @default(PUBLIC)
   xUrl               String?
   instagramUrl       String?

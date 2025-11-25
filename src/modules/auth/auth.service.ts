@@ -136,19 +136,36 @@ export class AuthService {
   }
 
   async signupStep2(payload: SignupStep2Dto): Promise<{ user: User }> {
-    const {
-      userId,
-      dateOfBirth,
-      addressLine1,
-      addressLine2,
-      city,
-      state,
-      zipCode,
-    } = payload;
+    try {
+      const {
+        userId,
+        phoneNumber,
+        dateOfBirth,
+        addressLine1,
+        addressLine2,
+        city,
+        state,
+        zipCode,
+      } = payload;
 
-    const user = await this.prisma.user.update({
-      where: { id: userId },
-      data: {
+      // If phone number is provided, check if it's already taken by another user
+      if (phoneNumber) {
+        const existingUser = await this.prisma.user.findFirst({
+          where: {
+            phoneNumber,
+            NOT: { id: userId },
+          },
+        });
+
+        if (existingUser) {
+          throw new HttpException(
+            "Phone number is already in use by another user",
+            HttpStatus.CONFLICT
+          );
+        }
+      }
+
+      const updateData: any = {
         dateOfBirth: new Date(dateOfBirth),
         addressLine1,
         addressLine2,
@@ -156,18 +173,37 @@ export class AuthService {
         state,
         zipCode,
         signupStep: 2,
-      },
-    });
+      };
 
-    // Generate and store OTP for phone verification
-    await this.otpService.generateOtp({
-      userId: user.id,
-      type: OtpType.PHONE_VERIFICATION,
-      channel: OtpChannel.PHONE,
-      expiresInMinutes: 10,
-    });
+      // Update phone number if provided
+      if (phoneNumber) {
+        updateData.phoneNumber = phoneNumber;
+      }
 
-    return { user: user as unknown as User };
+      const user = await this.prisma.user.update({
+        where: { id: userId },
+        data: updateData,
+      });
+
+      // Generate and store OTP for phone verification
+      await this.otpService.generateOtp({
+        userId: user.id,
+        type: OtpType.PHONE_VERIFICATION,
+        channel: OtpChannel.PHONE,
+        expiresInMinutes: 10,
+      });
+
+      return { user: user as unknown as User };
+    } catch (error: any) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      console.error("Signup step 2 error:", error);
+      throw new HttpException(
+        error?.message || "Failed to update user information",
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
   }
 
   async verifyPhoneOtp(payload: VerifyOtpDto): Promise<{ user: User }> {
@@ -211,11 +247,20 @@ export class AuthService {
 
   async signupStep3(
     payload: SignupStep3Dto,
+    userImage?: any,
     documentFront?: any,
     documentBack?: any
   ): Promise<{ user: User }> {
     try {
       const { userId, last4Ssn, documentType } = payload;
+
+      // userImage is mandatory in step 3
+      if (!userImage) {
+        throw new HttpException(
+          "User image is required",
+          HttpStatus.BAD_REQUEST
+        );
+      }
 
       if (!last4Ssn && !documentType) {
         throw new HttpException(
@@ -231,6 +276,21 @@ export class AuthService {
           HttpStatus.BAD_REQUEST
         );
       }
+
+      let userImageUrl: string | null = null;
+
+      // Upload user image to S3
+      const userImageFolder = "user/profile";
+      const userImageKey = this.s3Service.generateS3Key(
+        userImageFolder,
+        userId,
+        userImage.originalname,
+        "user-image"
+      );
+      userImageUrl = await this.s3Service.uploadFileBuffer(
+        userImage,
+        userImageKey
+      );
 
       let documentFrontUrl: string | null = null;
       let documentBackUrl: string | null = null;
@@ -267,6 +327,7 @@ export class AuthService {
       const user = await this.prisma.user.update({
         where: { id: userId },
         data: {
+          userImage: userImageUrl,
           last4Ssn: last4Ssn ?? null,
           documentType: documentType ?? null,
           documentFrontUrl: documentFrontUrl,
