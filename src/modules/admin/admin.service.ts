@@ -8,6 +8,7 @@ import { AdminVerifyOtpDto } from "./dto/admin-verify-otp.dto";
 import { AdminResendOtpDto } from "./dto/admin-resend-otp.dto";
 import { UpdateUserStatusDto } from "./dto/update-user-status.dto";
 import { AddPlotPointsDto } from "./dto/add-plot-points.dto";
+import { UpdateAdminPasswordDto } from "./dto/update-admin-password.dto";
 import { Admin } from "./entities/admin.entity";
 import { JwtPayload } from "../../common/interfaces/jwt-payload.interface";
 import { OtpService, OtpType, OtpChannel } from "../otp/otp.service";
@@ -46,9 +47,6 @@ export class AdminService {
         },
       });
 
-      // Generate and store OTP for email verification (admin signup doesn't require OTP, but keeping for consistency)
-      // In production, you might skip OTP for admin signup or require admin approval
-
       return { admin: admin as unknown as Admin };
     } catch (error: any) {
       if (error instanceof HttpException) {
@@ -79,7 +77,6 @@ export class AdminService {
         throw new HttpException("Invalid credentials", HttpStatus.UNAUTHORIZED);
       }
 
-      // Generate and store OTP for login
       await this.otpService.generateOtp({
         adminId: admin.id,
         type: OtpType.LOGIN_EMAIL,
@@ -155,7 +152,6 @@ export class AdminService {
     try {
       const { adminId } = payload;
 
-      // Verify admin exists
       const admin = await this.prisma.admin.findUnique({
         where: { id: adminId },
       });
@@ -164,7 +160,6 @@ export class AdminService {
         throw new HttpException("Admin not found", HttpStatus.NOT_FOUND);
       }
 
-      // Generate and store new OTP for login (this will delete old unverified OTPs)
       await this.otpService.generateOtp({
         adminId,
         type: OtpType.LOGIN_EMAIL,
@@ -180,6 +175,51 @@ export class AdminService {
       console.error("Admin resend OTP error:", error);
       throw new HttpException(
         error?.message || "Failed to resend OTP",
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  async updatePassword(
+    adminId: string,
+    payload: UpdateAdminPasswordDto
+  ): Promise<{ message: string }> {
+    const { currentPassword, newPassword } = payload;
+    try {
+      const admin = await this.prisma.admin.findUnique({
+        where: { id: adminId }, 
+      });
+
+      if (!admin) {
+        throw new HttpException("Admin not found", HttpStatus.NOT_FOUND);
+      }
+
+      const isMatch = await bcrypt.compare(currentPassword, admin.passwordHash);
+      if (!isMatch) {
+        throw new HttpException(
+          "Incorrect current password",
+          HttpStatus.UNAUTHORIZED
+        );
+      }
+
+      const newPasswordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+
+      await this.prisma.admin.update({
+        where: { id: adminId },
+        data: {
+          passwordHash: newPasswordHash,
+          updatedAt: new Date(),
+        },
+      });
+
+      return { message: "Admin password updated successfully" };
+    } catch (error: any) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      console.error("Admin password update error:", error);
+      throw new HttpException(
+        error?.message || "Failed to update password",
         HttpStatus.INTERNAL_SERVER_ERROR
       );
     }
@@ -275,7 +315,6 @@ export class AdminService {
     try {
       const skip = (page - 1) * limit;
 
-      // Build search condition if search query is provided
       let searchCondition: any = {};
       if (searchQuery && searchQuery.trim().length > 0) {
         const query = searchQuery.trim();
