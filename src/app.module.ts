@@ -9,6 +9,7 @@ import { AdminModule } from "./modules/admin/admin.module";
 import { OtpModule } from "./modules/otp/otp.module";
 import { S3Module } from "./modules/s3/s3.module";
 import { CommunityModule } from "./modules/community/community.module";
+import { PlotModule } from "./modules/plot/plot.module";
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { CommunityModule } from "./modules/community/community.module";
     OtpModule,
     S3Module,
     CommunityModule,
+    PlotModule,
   ],
 })
 export class AppModule {}

@@ -57,13 +57,14 @@ model User {
   updatedAt          DateTime       @updatedAt
 
   // Relations
-  posts        Post[]
-  comments     Comment[]
-  postLikes    PostLike[]
-  commentLikes CommentLike[]
-  postShares   PostShare[]
-  followers    Follow[]      @relation("UserFollowers")
-  following    Follow[]      @relation("UserFollowing")
+  posts           Post[]
+  comments        Comment[]
+  postLikes       PostLike[]
+  commentLikes    CommentLike[]
+  postShares      PostShare[]
+  followers       Follow[]         @relation("UserFollowers")
+  following       Follow[]         @relation("UserFollowing")
+  plotPredictions PlotPrediction[]
 }
 
 model Admin {
@@ -199,4 +200,139 @@ model Follow {
   @@unique([followerId, followingId])
   @@index([followerId])
   @@index([followingId])
+}
+
+enum PlotType {
+  BASIC_PLOT
+  PLOT_DROP
+  INFLUENCER_DROP
+}
+
+enum QuestionType {
+  YES_NO
+  MULTIPLE_CHOICE
+}
+
+enum PlotStatus {
+  DRAFT
+  ACTIVE
+  CLOSED
+  RESULTS_ANNOUNCED
+}
+
+model Show {
+  id            String   @id @default(uuid())
+  thumbnailUrl  String? // S3 URL for thumbnail image
+  title         String
+  seasonNumber  Int
+  description   String?  @db.Text
+  minimumAmount Decimal  @db.Decimal(10, 2)
+  maximumAmount Decimal  @db.Decimal(10, 2)
+  payoutAmount  Decimal  @db.Decimal(10, 2)
+  plotpicksVig  Decimal  @db.Decimal(5, 2) // Percentage
+  bonusKicker   Boolean  @default(false) // Top performance bonus
+  bonusAmount   Decimal? @db.Decimal(10, 2) // Top performers bonus
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  plots Plot[]
+
+  @@unique([title, seasonNumber]) // One show per title+season combination
+  @@index([title, seasonNumber])
+}
+
+model Plot {
+  id                String     @id @default(uuid())
+  showId            String
+  episodeNumber     Int // Episode number (1, 2, 3, etc.)
+  type              PlotType
+  numberOfQuestions Int
+  activeStartDate   DateTime
+  activeStartTime   String     @db.VarChar(10) // HH:mm format
+  closeEndDate      DateTime
+  closeEndTime      String     @db.VarChar(10) // HH:mm format
+  status            PlotStatus @default(DRAFT)
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  show            Show             @relation(fields: [showId], references: [id], onDelete: Cascade)
+  questions       Question[]
+  plotPredictions PlotPrediction[]
+
+  @@unique([showId, episodeNumber]) // One plot per show+episode combination
+  @@index([showId])
+  @@index([status])
+  @@index([activeStartDate, closeEndDate])
+  @@index([showId, episodeNumber])
+}
+
+model Question {
+  id              String       @id @default(uuid())
+  plotId          String
+  questionText    String       @db.Text
+  type            QuestionType
+  order           Int // Order of question in the plot
+  isPaused        Boolean      @default(false)
+  correctOptionId String? // Set when results are announced
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  plot                Plot                 @relation(fields: [plotId], references: [id], onDelete: Cascade)
+  options             QuestionOption[]
+  questionPredictions QuestionPrediction[]
+  correctOption       QuestionOption?      @relation("CorrectOption", fields: [correctOptionId], references: [id])
+
+  @@index([plotId, order])
+  @@index([isPaused])
+}
+
+model QuestionOption {
+  id         String   @id @default(uuid())
+  questionId String
+  optionText String // For YES_NO: "Yes" or "No", For MULTIPLE_CHOICE: "1", "2", "3", "4" or custom text
+  order      Int // Order of option (1, 2, 3, 4 for multiple choice)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  question            Question             @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  correctFor          Question[]           @relation("CorrectOption")
+  questionPredictions QuestionPrediction[]
+
+  @@index([questionId, order])
+}
+
+model PlotPrediction {
+  id              String   @id @default(uuid())
+  userId          String
+  plotId          String
+  predictedAmount Decimal  @db.Decimal(10, 2) // Total amount predicted for the plot
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plot                Plot                 @relation(fields: [plotId], references: [id], onDelete: Cascade)
+  questionPredictions QuestionPrediction[]
+
+  @@unique([userId, plotId]) // User can only predict once per plot
+  @@index([userId])
+  @@index([plotId])
+  @@index([createdAt])
+}
+
+model QuestionPrediction {
+  id               String   @id @default(uuid())
+  plotPredictionId String
+  questionId       String
+  optionId         String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  plotPrediction PlotPrediction @relation(fields: [plotPredictionId], references: [id], onDelete: Cascade)
+  question       Question       @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  option         QuestionOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+
+  @@unique([plotPredictionId, questionId]) // One option per question per plot prediction
+  @@index([plotPredictionId])
+  @@index([questionId])
+  @@index([optionId])
 }
