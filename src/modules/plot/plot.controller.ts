@@ -25,6 +25,7 @@ import { UpdateShowWithEpisodeDto } from "./dto/admin/update-show-with-episode.d
 import { AnnounceResultsDto } from "./dto/admin/announce-results.dto";
 import { UpdatePlotStatusDto } from "./dto/admin/update-plot-status.dto";
 import { CreatePredictionDto } from "./dto/user/create-prediction.dto";
+import { UpdatePredictionDto } from "./dto/user/update-prediction.dto";
 import { AdminGuard } from "../../common/guards/admin.guard";
 import { UserGuard } from "../../common/guards/user.guard";
 import { S3Service } from "../s3/s3.service";
@@ -390,6 +391,23 @@ export class PlotController {
   }
 
   @UseGuards(UserGuard)
+  @Patch("predictions")
+  async updatePrediction(
+    @Request() req: any,
+    @Body(
+      new ValidationPipe({
+        whitelist: true,
+        transform: true,
+        forbidNonWhitelisted: false,
+      })
+    )
+    body: UpdatePredictionDto
+  ) {
+    const userId = req.user.id;
+    return this.plotService.updatePrediction(userId, body);
+  }
+
+  @UseGuards(UserGuard)
   @Get("predictions/my")
   async getUserPredictions(
     @Request() req: any,
@@ -400,6 +418,16 @@ export class PlotController {
     const pageNum = page ? parseInt(page, 10) : 1;
     const limitNum = limit ? parseInt(limit, 10) : 20;
     return this.plotService.getUserPredictions(userId, pageNum, limitNum);
+  }
+
+  @UseGuards(UserGuard)
+  @Get("predictions/plot/:plotId")
+  async getUserPredictionByPlotId(
+    @Request() req: any,
+    @Param("plotId") plotId: string
+  ) {
+    const userId = req.user.id;
+    return this.plotService.getUserPredictionByPlotId(userId, plotId);
   }
 
   @UseGuards(UserGuard)

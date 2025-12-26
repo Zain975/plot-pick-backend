@@ -5,6 +5,7 @@ import { CreateShowWithEpisodeDto } from "./dto/admin/create-show-with-episode.d
 import { UpdateShowWithEpisodeDto } from "./dto/admin/update-show-with-episode.dto";
 import { AnnounceResultsDto } from "./dto/admin/announce-results.dto";
 import { CreatePredictionDto } from "./dto/user/create-prediction.dto";
+import { UpdatePredictionDto } from "./dto/user/update-prediction.dto";
 import { PlotStatus, PlotType, QuestionType } from "@prisma/client";
 
 @Injectable()
@@ -1313,7 +1314,17 @@ export class PlotService {
       const plot = await this.prisma.plot.findUnique({
         where: { id: plotId },
         include: {
-          show: true,
+          show: {
+            include: {
+              plots: {
+                select: {
+                  id: true,
+                  episodeNumber: true,
+                },
+                orderBy: { episodeNumber: "asc" },
+              },
+            },
+          },
           questions: {
             where: { isPaused: false },
             include: {
@@ -1342,6 +1353,20 @@ export class PlotService {
         throw new HttpException("Plot not found", HttpStatus.NOT_FOUND);
       }
 
+      // Build episode IDs object (episode1Id, episode2Id, etc.)
+      const episodeIds: any = {};
+      if (plot.show.plots) {
+        for (const episode of plot.show.plots) {
+          episodeIds[`episode${episode.episodeNumber}Id`] = episode.id;
+        }
+      }
+
+      // Add episode IDs to show object
+      const showWithEpisodes = {
+        ...plot.show,
+        ...episodeIds,
+      };
+
       // Check if plot is active and within time window
       const now = new Date();
       const isActive =
@@ -1355,6 +1380,7 @@ export class PlotService {
 
       return {
         ...plot,
+        show: showWithEpisodes,
         isActive,
         canPredict:
           isActive &&
@@ -1578,6 +1604,223 @@ export class PlotService {
     }
   }
 
+  async updatePrediction(
+    userId: string,
+    data: UpdatePredictionDto
+  ): Promise<any> {
+    try {
+      // Verify plot exists and get all questions
+      const plot = await this.prisma.plot.findUnique({
+        where: { id: data.plotId },
+        include: {
+          show: true,
+          questions: {
+            where: { isPaused: false },
+            include: {
+              options: true,
+            },
+            orderBy: { order: "asc" },
+          },
+        },
+      });
+
+      if (!plot) {
+        throw new HttpException("Plot not found", HttpStatus.NOT_FOUND);
+      }
+
+      // Check if plot is still active and within time window (before close end date/time)
+      const now = new Date();
+      if (
+        plot.status !== PlotStatus.ACTIVE ||
+        plot.activeStartDate > now ||
+        plot.closeEndDate < now
+      ) {
+        throw new HttpException(
+          "Plot is not active or prediction window has closed",
+          HttpStatus.BAD_REQUEST
+        );
+      }
+
+      // Find existing prediction
+      const existingPrediction = await this.prisma.plotPrediction.findUnique({
+        where: {
+          userId_plotId: {
+            userId,
+            plotId: data.plotId,
+          },
+        },
+        include: {
+          questionPredictions: {
+            include: {
+              question: true,
+            },
+          },
+        },
+      });
+
+      if (!existingPrediction) {
+        throw new HttpException(
+          "You have not made a prediction on this plot yet",
+          HttpStatus.NOT_FOUND
+        );
+      }
+
+      // Validate predicted amount if provided
+      if (data.predictedAmount !== undefined) {
+        const minAmount = Number(plot.show.minimumAmount);
+        const maxAmount = Number(plot.show.maximumAmount);
+        if (
+          data.predictedAmount < minAmount ||
+          data.predictedAmount > maxAmount
+        ) {
+          throw new HttpException(
+            `Predicted amount must be between ${minAmount} and ${maxAmount}`,
+            HttpStatus.BAD_REQUEST
+          );
+        }
+      }
+
+      // Validate selections if provided
+      if (data.selections && data.selections.length > 0) {
+        // Check for duplicate question selections
+        const selectionQuestionIds = data.selections.map((s) => s.questionId);
+        const uniqueQuestionIds = new Set(selectionQuestionIds);
+        if (uniqueQuestionIds.size !== selectionQuestionIds.length) {
+          throw new HttpException(
+            "Duplicate question selections are not allowed",
+            HttpStatus.BAD_REQUEST
+          );
+        }
+
+        // Validate each selection
+        for (const selection of data.selections) {
+          const question = plot.questions.find(
+            (q) => q.id === selection.questionId
+          );
+          if (!question) {
+            throw new HttpException(
+              `Question ${selection.questionId} does not belong to this plot`,
+              HttpStatus.BAD_REQUEST
+            );
+          }
+
+          if (question.isPaused) {
+            throw new HttpException(
+              `Question ${selection.questionId} is paused`,
+              HttpStatus.BAD_REQUEST
+            );
+          }
+
+          const option = question.options.find(
+            (o) => o.id === selection.optionId
+          );
+          if (!option) {
+            throw new HttpException(
+              `Option ${selection.optionId} does not belong to question ${selection.questionId}`,
+              HttpStatus.BAD_REQUEST
+            );
+          }
+        }
+      }
+
+      // Update prediction in a transaction
+      const result = await this.prisma.$transaction(async (tx) => {
+        // Update plot prediction amount if provided
+        const updateData: any = {};
+        if (data.predictedAmount !== undefined) {
+          updateData.predictedAmount = data.predictedAmount;
+        }
+
+        const updatedPrediction = await tx.plotPrediction.update({
+          where: { id: existingPrediction.id },
+          data: updateData,
+        });
+
+        // Update question predictions if provided
+        if (data.selections && data.selections.length > 0) {
+          for (const selection of data.selections) {
+            // Find existing question prediction
+            const existingQuestionPrediction =
+              await tx.questionPrediction.findUnique({
+                where: {
+                  plotPredictionId_questionId: {
+                    plotPredictionId: existingPrediction.id,
+                    questionId: selection.questionId,
+                  },
+                },
+              });
+
+            if (existingQuestionPrediction) {
+              // Update existing question prediction
+              await tx.questionPrediction.update({
+                where: { id: existingQuestionPrediction.id },
+                data: { optionId: selection.optionId },
+              });
+            } else {
+              // Create new question prediction (in case user didn't have selection for this question before)
+              await tx.questionPrediction.create({
+                data: {
+                  plotPredictionId: existingPrediction.id,
+                  questionId: selection.questionId,
+                  optionId: selection.optionId,
+                },
+              });
+            }
+          }
+        }
+
+        return updatedPrediction;
+      });
+
+      // Fetch complete updated prediction with all details
+      const completePrediction = await this.prisma.plotPrediction.findUnique({
+        where: { id: result.id },
+        include: {
+          plot: {
+            include: {
+              show: true,
+            },
+          },
+          questionPredictions: {
+            include: {
+              question: {
+                include: {
+                  options: true,
+                },
+              },
+              option: true,
+            },
+          },
+        },
+      });
+
+      if (!completePrediction) {
+        throw new HttpException(
+          "Failed to fetch updated prediction",
+          HttpStatus.INTERNAL_SERVER_ERROR
+        );
+      }
+
+      // Sort question predictions by question order
+      if (completePrediction.questionPredictions) {
+        completePrediction.questionPredictions.sort(
+          (a, b) => a.question.order - b.question.order
+        );
+      }
+
+      return completePrediction;
+    } catch (error: any) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      console.error("Update prediction error:", error);
+      throw new HttpException(
+        error?.message || "Failed to update prediction",
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
   async getUserPredictions(
     userId: string,
     page: number = 1,
@@ -1638,6 +1881,118 @@ export class PlotService {
     } catch (error: any) {
       throw new HttpException(
         error?.message || "Failed to fetch user predictions",
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  async getUserPredictionByPlotId(
+    userId: string,
+    plotId: string
+  ): Promise<any> {
+    try {
+      // Find user's prediction for this plot
+      const prediction = await this.prisma.plotPrediction.findUnique({
+        where: {
+          userId_plotId: {
+            userId,
+            plotId,
+          },
+        },
+        include: {
+          plot: {
+            include: {
+              show: {
+                include: {
+                  plots: {
+                    select: {
+                      id: true,
+                      episodeNumber: true,
+                    },
+                    orderBy: { episodeNumber: "asc" },
+                  },
+                },
+              },
+              questions: {
+                include: {
+                  options: true,
+                  correctOption: true,
+                },
+                orderBy: { order: "asc" },
+              },
+            },
+          },
+          questionPredictions: {
+            include: {
+              question: {
+                include: {
+                  options: true,
+                  correctOption: true,
+                },
+              },
+              option: true,
+            },
+          },
+        },
+      });
+
+      if (!prediction) {
+        throw new HttpException(
+          "You have not made a prediction on this plot",
+          HttpStatus.NOT_FOUND
+        );
+      }
+
+      // Sort question predictions by question order
+      if (prediction.questionPredictions) {
+        prediction.questionPredictions.sort(
+          (a, b) => a.question.order - b.question.order
+        );
+      }
+
+      // Build episode IDs object (episode1Id, episode2Id, etc.)
+      const episodeIds: any = {};
+      if (prediction.plot.show.plots) {
+        for (const episode of prediction.plot.show.plots) {
+          episodeIds[`episode${episode.episodeNumber}Id`] = episode.id;
+        }
+      }
+
+      // Add episode IDs to show object
+      const showWithEpisodes = {
+        ...prediction.plot.show,
+        ...episodeIds,
+      };
+
+      // Check if plot is active and within time window
+      const now = new Date();
+      const isActive =
+        prediction.plot.status === PlotStatus.ACTIVE &&
+        prediction.plot.activeStartDate <= now &&
+        prediction.plot.closeEndDate >= now;
+
+      return {
+        show: showWithEpisodes,
+        plot: {
+          ...prediction.plot,
+          isActive,
+          canPredict:
+            isActive && prediction.plot.status !== PlotStatus.RESULTS_ANNOUNCED,
+        },
+        prediction: {
+          id: prediction.id,
+          predictedAmount: prediction.predictedAmount,
+          createdAt: prediction.createdAt,
+          updatedAt: prediction.updatedAt,
+          questionPredictions: prediction.questionPredictions,
+        },
+      };
+    } catch (error: any) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new HttpException(
+        error?.message || "Failed to fetch prediction details",
         HttpStatus.INTERNAL_SERVER_ERROR
       );
     }
