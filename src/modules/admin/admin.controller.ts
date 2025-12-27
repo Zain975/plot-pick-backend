@@ -6,8 +6,11 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UseGuards,
+  ForbiddenException,
 } from "@nestjs/common";
+import { Request } from "express"; 
 import { AdminService } from "./admin.service";
 import { AdminSignupDto } from "./dto/admin-signup.dto";
 import { AdminLoginDto } from "./dto/admin-login.dto";
@@ -15,8 +18,18 @@ import { AdminVerifyOtpDto } from "./dto/admin-verify-otp.dto";
 import { AdminResendOtpDto } from "./dto/admin-resend-otp.dto";
 import { UpdateUserStatusDto } from "./dto/update-user-status.dto";
 import { AddPlotPointsDto } from "./dto/add-plot-points.dto";
+import { UpdateAdminPasswordDto } from "./dto/update-admin-password.dto"; 
 import { Public } from "../../common/decorators/public.decorator";
 import { AdminGuard } from "../../common/guards/admin.guard";
+import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
+
+interface AuthenticatedRequest extends Request {
+  user: {
+    id: string;
+    email: string;
+    role: string;
+  };
+}
 
 @Controller("admin")
 export class AdminController {
@@ -44,6 +57,21 @@ export class AdminController {
   @Post("resend-otp")
   resendOtp(@Body() body: AdminResendOtpDto) {
     return this.adminService.resendOtp(body);
+  }
+
+  @UseGuards(JwtAuthGuard, AdminGuard) 
+  @Patch("password")
+  updateAdminPassword(
+    @Req() req: AuthenticatedRequest,
+    @Body() body: UpdateAdminPasswordDto
+  ) {
+    const adminId = req.user?.id;
+    
+    if (!adminId) {
+        throw new ForbiddenException("Authentication error: Admin ID not found in token.");
+    }
+    
+    return this.adminService.updatePassword(adminId, body);
   }
 
   @UseGuards(AdminGuard)
