@@ -560,4 +560,61 @@ export class AuthService {
       );
     }
   }
+
+  /**
+   * Skip onboarding - allows users who completed step 1 to get a token
+   * and access the app in read-only mode
+   */
+  async skipOnboarding(
+    userId: string
+  ): Promise<{ user: User; accessToken: string }> {
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+      });
+
+      if (!user) {
+        throw new HttpException("User not found", HttpStatus.NOT_FOUND);
+      }
+
+      // Check if user has completed at least step 1
+      if (user.signupStep < 1) {
+        throw new HttpException(
+          "Please complete step 1 of onboarding first",
+          HttpStatus.BAD_REQUEST
+        );
+      }
+
+      // Check if user account is locked
+      if (user.status === "LOCKED") {
+        throw new HttpException(
+          "Your account is locked by the admin, kindly contact the admin",
+          HttpStatus.FORBIDDEN
+        );
+      }
+
+      // Generate JWT token for authenticated access (even with incomplete onboarding)
+      const jwtPayload: JwtPayload = {
+        sub: user.id,
+        email: user.email,
+        role: "user",
+      };
+
+      const accessToken = this.jwtService.sign(jwtPayload);
+
+      return {
+        user: user as unknown as User,
+        accessToken,
+      };
+    } catch (error: any) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      console.error("Skip onboarding error:", error);
+      throw new HttpException(
+        error?.message || "Failed to skip onboarding",
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
 }
