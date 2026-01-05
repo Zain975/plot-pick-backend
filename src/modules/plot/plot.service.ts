@@ -1400,12 +1400,76 @@ export class PlotService {
         where: { plotId },
       });
 
+      // Get all question predictions for this plot to calculate percentages
+      const allQuestionPredictions =
+        await this.prisma.questionPrediction.findMany({
+          where: {
+            plotPrediction: {
+              plotId,
+            },
+          },
+          select: {
+            questionId: true,
+            optionId: true,
+          },
+        });
+
+      // Calculate option counts per question
+      const optionCountsByQuestion = new Map<string, Map<string, number>>();
+
+      // Initialize maps for each question
+      plot.questions.forEach((question) => {
+        optionCountsByQuestion.set(question.id, new Map<string, number>());
+        question.options.forEach((option) => {
+          optionCountsByQuestion.get(question.id)!.set(option.id, 0);
+        });
+      });
+
+      // Count predictions for each option
+      allQuestionPredictions.forEach((qp) => {
+        const questionMap = optionCountsByQuestion.get(qp.questionId);
+        if (questionMap) {
+          const currentCount = questionMap.get(qp.optionId) || 0;
+          questionMap.set(qp.optionId, currentCount + 1);
+        }
+      });
+
+      // Calculate total predictions per question and percentages
+      const questionsWithPercentages = plot.questions.map((question) => {
+        const optionCounts =
+          optionCountsByQuestion.get(question.id) || new Map();
+        const totalQuestionPredictions = Array.from(
+          optionCounts.values()
+        ).reduce((sum, count) => sum + count, 0);
+
+        const optionsWithPercentages = question.options.map((option) => {
+          const count = optionCounts.get(option.id) || 0;
+          const percentage =
+            totalQuestionPredictions > 0
+              ? Math.round((count / totalQuestionPredictions) * 100 * 100) / 100 // Round to 2 decimal places
+              : 0;
+
+          return {
+            ...option,
+            predictedPercentage: percentage,
+            predictedCount: count,
+          };
+        });
+
+        return {
+          ...question,
+          options: optionsWithPercentages,
+          totalPredictions: totalQuestionPredictions,
+        };
+      });
+
       // Users with incomplete onboarding (signupStep !== 3) cannot predict
       const isFullyVerified = signupStep === 3;
 
       return {
         ...plot,
         show: showWithEpisodes,
+        questions: questionsWithPercentages,
         isActive,
         canPredict:
           isFullyVerified &&
