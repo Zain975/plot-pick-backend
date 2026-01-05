@@ -1,17 +1,26 @@
-import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
+import {
+  HttpException,
+  HttpStatus,
+  Injectable,
+  Inject,
+  forwardRef,
+} from "@nestjs/common";
 import { PrismaService } from "../../../database/prisma.service";
 import { S3Service } from "../../s3/s3.service";
 import { CreatePostDto } from "./dto/create-post.dto";
 import { UpdatePostDto } from "./dto/update-post.dto";
 import { Post } from "../entities/post.entity";
 import { ConfigService } from "@nestjs/config";
+import { FollowService } from "../follow/follow.service";
 
 @Injectable()
 export class PostsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly s3Service: S3Service,
-    private readonly configService: ConfigService
+    private readonly configService: ConfigService,
+    @Inject(forwardRef(() => FollowService))
+    private readonly followService: FollowService
   ) {}
 
   async create(
@@ -120,13 +129,46 @@ export class PostsService {
         },
       });
 
-      return posts.map((post) => ({
-        ...post,
-        isLiked: userId ? post.likes.length > 0 : false,
-        isShared: userId ? post.shares.length > 0 : false,
-        likes: undefined,
-        shares: undefined,
-      })) as Post[];
+      // Get unique user IDs to fetch followersCount efficiently
+      const uniqueUserIds = [...new Set(posts.map((post) => post.user.id))];
+
+      // Fetch followersCount for all unique users in parallel
+      const followersCountMap = new Map<string, number>();
+      await Promise.all(
+        uniqueUserIds.map(async (userId) => {
+          const count = await this.prisma.follow.count({
+            where: { followingId: userId },
+          });
+          followersCountMap.set(userId, count);
+        })
+      );
+
+      // Add isFollowing status and followersCount for each post's user
+      const postsWithFollowing = await Promise.all(
+        posts.map(async (post) => {
+          let isFollowing = false;
+          if (userId && userId !== post.user.id) {
+            isFollowing = await this.followService.isFollowing(
+              userId,
+              post.user.id
+            );
+          }
+          return {
+            ...post,
+            user: {
+              ...post.user,
+              isFollowing,
+              followersCount: followersCountMap.get(post.user.id) || 0,
+            },
+            isLiked: userId ? post.likes.length > 0 : false,
+            isShared: userId ? post.shares.length > 0 : false,
+            likes: undefined,
+            shares: undefined,
+          };
+        })
+      );
+
+      return postsWithFollowing as Post[];
     } catch (error: any) {
       throw new HttpException(
         error?.message || "Failed to fetch posts",
@@ -174,8 +216,27 @@ export class PostsService {
         },
       });
 
+      // Add isFollowing status and followersCount for the post owner
+      let isFollowing = false;
+      if (currentUserId && currentUserId !== targetUserId) {
+        isFollowing = await this.followService.isFollowing(
+          currentUserId,
+          targetUserId
+        );
+      }
+
+      // Get followersCount for the target user
+      const followersCount = await this.prisma.follow.count({
+        where: { followingId: targetUserId },
+      });
+
       return posts.map((post) => ({
         ...post,
+        user: {
+          ...post.user,
+          isFollowing,
+          followersCount,
+        },
         isLiked: currentUserId ? post.likes.length > 0 : false,
         isShared: currentUserId ? post.shares.length > 0 : false,
         likes: undefined,
@@ -222,8 +283,27 @@ export class PostsService {
         throw new HttpException("Post not found", HttpStatus.NOT_FOUND);
       }
 
+      // Get isFollowing status and followersCount for the post's user
+      let isFollowing = false;
+      if (userId && userId !== post.user.id) {
+        isFollowing = await this.followService.isFollowing(
+          userId,
+          post.user.id
+        );
+      }
+
+      // Get followersCount for the post's user
+      const followersCount = await this.prisma.follow.count({
+        where: { followingId: post.user.id },
+      });
+
       return {
         ...post,
+        user: {
+          ...post.user,
+          isFollowing,
+          followersCount,
+        },
         isLiked: userId ? post.likes.length > 0 : false,
         isShared: userId ? post.shares.length > 0 : false,
         likes: undefined,
