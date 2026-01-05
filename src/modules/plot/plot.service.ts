@@ -1294,8 +1294,21 @@ export class PlotService {
         this.prisma.plot.count({ where }),
       ]);
 
+      // Get total predictions count for each plot
+      const plotsWithPredictions = await Promise.all(
+        plots.map(async (plot) => {
+          const totalPredictions = await this.prisma.plotPrediction.count({
+            where: { plotId: plot.id },
+          });
+          return {
+            ...plot,
+            totalPredictions,
+          };
+        })
+      );
+
       return {
-        plots,
+        plots: plotsWithPredictions,
         total,
         page,
         limit,
@@ -1309,7 +1322,11 @@ export class PlotService {
     }
   }
 
-  async getPlotDetailsForUser(plotId: string, userId?: string) {
+  async getPlotDetailsForUser(
+    plotId: string,
+    userId?: string,
+    signupStep?: number
+  ) {
     try {
       const plot = await this.prisma.plot.findUnique({
         where: { id: plotId },
@@ -1378,15 +1395,25 @@ export class PlotService {
       const hasPredicted =
         userId && plot.plotPredictions && plot.plotPredictions.length > 0;
 
+      // Get total number of predictions on this plot
+      const totalPredictions = await this.prisma.plotPrediction.count({
+        where: { plotId },
+      });
+
+      // Users with incomplete onboarding (signupStep !== 3) cannot predict
+      const isFullyVerified = signupStep === 3;
+
       return {
         ...plot,
         show: showWithEpisodes,
         isActive,
         canPredict:
+          isFullyVerified &&
           isActive &&
           plot.status !== PlotStatus.RESULTS_ANNOUNCED &&
           !hasPredicted,
         userPrediction: hasPredicted ? (plot as any).plotPredictions[0] : null,
+        totalPredictions,
       };
     } catch (error: any) {
       if (error instanceof HttpException) {
@@ -1871,8 +1898,24 @@ export class PlotService {
         }
       });
 
+      // Get total predictions count for each plot
+      const predictionsWithTotalCounts = await Promise.all(
+        predictions.map(async (prediction) => {
+          const totalPredictions = await this.prisma.plotPrediction.count({
+            where: { plotId: prediction.plotId },
+          });
+          return {
+            ...prediction,
+            plot: {
+              ...prediction.plot,
+              totalPredictions,
+            },
+          };
+        })
+      );
+
       return {
-        predictions,
+        predictions: predictionsWithTotalCounts,
         total,
         page,
         limit,
@@ -1971,6 +2014,11 @@ export class PlotService {
         prediction.plot.activeStartDate <= now &&
         prediction.plot.closeEndDate >= now;
 
+      // Get total number of predictions on this plot
+      const totalPredictions = await this.prisma.plotPrediction.count({
+        where: { plotId },
+      });
+
       return {
         show: showWithEpisodes,
         plot: {
@@ -1978,6 +2026,7 @@ export class PlotService {
           isActive,
           canPredict:
             isActive && prediction.plot.status !== PlotStatus.RESULTS_ANNOUNCED,
+          totalPredictions,
         },
         prediction: {
           id: prediction.id,
@@ -2073,8 +2122,21 @@ export class PlotService {
         }
       });
 
+      // Get total predictions count for each plot
+      const plotsWithTotalCounts = await Promise.all(
+        plots.map(async (plot) => {
+          const totalPredictions = await this.prisma.plotPrediction.count({
+            where: { plotId: plot.id },
+          });
+          return {
+            ...plot,
+            totalPredictions,
+          };
+        })
+      );
+
       return {
-        plots,
+        plots: plotsWithTotalCounts,
         total,
         page,
         limit,

@@ -117,4 +117,10 @@ export class AuthController {
   resendLoginOtp(@Body() body: ResendOtpDto) {
     return this.authService.resendOtp(body);
   }
+
+  @Public()
+  @Post("signup/skip")
+  skipOnboarding(@Body() body: { userId: string }) {
+    return this.authService.skipOnboarding(body.userId);
+  }
 }

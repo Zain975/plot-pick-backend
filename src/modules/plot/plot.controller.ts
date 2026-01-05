@@ -28,6 +28,7 @@ import { CreatePredictionDto } from "./dto/user/create-prediction.dto";
 import { UpdatePredictionDto } from "./dto/user/update-prediction.dto";
 import { AdminGuard } from "../../common/guards/admin.guard";
 import { UserGuard } from "../../common/guards/user.guard";
+import { VerifiedUserGuard } from "../../common/guards/verified-user.guard";
 import { S3Service } from "../s3/s3.service";
 import { PlotStatus } from "@prisma/client";
 
@@ -368,12 +369,14 @@ export class PlotController {
   @Get(":plotId")
   async getPlotDetails(@Request() req: any, @Param("plotId") plotId: string) {
     const userId = req.user.id;
-    return this.plotService.getPlotDetailsForUser(plotId, userId);
+    const signupStep = req.user.signupStep;
+    return this.plotService.getPlotDetailsForUser(plotId, userId, signupStep);
   }
 
   // ==================== USER: Prediction Endpoints ====================
+  // Note: Prediction endpoints require full verification (signupStep === 3)
 
-  @UseGuards(UserGuard)
+  @UseGuards(VerifiedUserGuard)
   @Post("predictions")
   async createPrediction(
     @Request() req: any,
@@ -390,7 +393,7 @@ export class PlotController {
     return this.plotService.createPrediction(userId, body);
   }
 
-  @UseGuards(UserGuard)
+  @UseGuards(VerifiedUserGuard)
   @Patch("predictions")
   async updatePrediction(
     @Request() req: any,
@@ -407,7 +410,7 @@ export class PlotController {
     return this.plotService.updatePrediction(userId, body);
   }
 
-  @UseGuards(UserGuard)
+  @UseGuards(VerifiedUserGuard)
   @Get("predictions/my")
   async getUserPredictions(
     @Request() req: any,
@@ -420,7 +423,7 @@ export class PlotController {
     return this.plotService.getUserPredictions(userId, pageNum, limitNum);
   }
 
-  @UseGuards(UserGuard)
+  @UseGuards(VerifiedUserGuard)
   @Get("predictions/plot/:plotId")
   async getUserPredictionByPlotId(
     @Request() req: any,
@@ -430,7 +433,7 @@ export class PlotController {
     return this.plotService.getUserPredictionByPlotId(userId, plotId);
   }
 
-  @UseGuards(UserGuard)
+  @UseGuards(VerifiedUserGuard)
   @Get("my/plots")
   async getUserPlots(
     @Request() req: any,
