@@ -269,7 +269,14 @@ export class CommentsService {
 
   async remove(id: string, userId: string): Promise<void> {
     try {
-      const comment = await this.prisma.comment.findUnique({ where: { id } });
+      const comment = await this.prisma.comment.findUnique({
+        where: { id },
+        include: {
+          replies: {
+            select: { id: true },
+          },
+        },
+      });
 
       if (!comment) {
         throw new HttpException("Comment not found", HttpStatus.NOT_FOUND);
@@ -283,10 +290,15 @@ export class CommentsService {
       }
 
       await this.prisma.$transaction(async (tx) => {
-        // Update post comments count
+        // Count total comments to delete: 1 (parent) + all replies
+        // When we delete a comment, cascade will delete all its replies
+        // So we need to decrement commentsCount by (1 + number of replies)
+        const totalCommentsToDelete = 1 + comment.replies.length;
+
+        // Update post comments count (decrement by parent + all replies)
         await tx.post.update({
           where: { id: comment.postId },
-          data: { commentsCount: { decrement: 1 } },
+          data: { commentsCount: { decrement: totalCommentsToDelete } },
         });
 
         // If it's a reply, update parent comment replies count
