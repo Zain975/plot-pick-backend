@@ -50,12 +50,19 @@ export class AdminController {
   @Get("users")
   getAllUsers(
     @Query("search") search?: string,
+    @Query("status") status?: string,
     @Query("page") page?: string,
     @Query("limit") limit?: string
   ) {
     const pageNum = page ? parseInt(page, 10) : 1;
     const limitNum = limit ? parseInt(limit, 10) : 20;
-    return this.adminService.getAllUsers(search, pageNum, limitNum);
+    return this.adminService.getAllUsers(search, pageNum, limitNum, status);
+  }
+
+  @UseGuards(AdminGuard)
+  @Get("stats")
+  getStats() {
+    return this.adminService.getStats();
   }
 
   @UseGuards(AdminGuard)

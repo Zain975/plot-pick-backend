@@ -503,27 +503,26 @@ export class AuthService {
       const isFullyVerified =
         isEmailVerified && isPhoneVerified && isIdentityVerified;
 
-      // Update status based on signupStep (only if not LOCKED)
+      // Update status based on signupStep
+      // Note: We already checked for LOCKED status above, so we can safely update here
       let updatedUser = user;
-      if (user.status !== "LOCKED") {
-        if (user.signupStep === 3 && user.status === "KYC_PENDING") {
-          // All steps complete - set status to ACTIVE
+      if (user.signupStep === 3 && user.status === "KYC_PENDING") {
+        // All steps complete - set status to ACTIVE
+        updatedUser = await this.prisma.user.update({
+          where: { id: userId },
+          data: {
+            status: "ACTIVE" as any,
+          },
+        });
+      } else if (user.signupStep < 3) {
+        // Steps not complete - ensure status is KYC_PENDING
+        if (user.status !== "KYC_PENDING") {
           updatedUser = await this.prisma.user.update({
             where: { id: userId },
             data: {
-              status: "ACTIVE" as any,
+              status: "KYC_PENDING" as any,
             },
           });
-        } else if (user.signupStep < 3) {
-          // Steps not complete - ensure status is KYC_PENDING
-          if (user.status !== "KYC_PENDING") {
-            updatedUser = await this.prisma.user.update({
-              where: { id: userId },
-              data: {
-                status: "KYC_PENDING" as any,
-              },
-            });
-          }
         }
       }
 
