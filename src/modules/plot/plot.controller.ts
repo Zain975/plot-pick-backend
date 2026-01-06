@@ -52,7 +52,7 @@ export class PlotController {
         validators: [
           new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 }), // 5MB max
           new FileTypeValidator({
-            fileType: /(jpg|jpeg|png|gif|webp)$/,
+            fileType: /^image\/(jpeg|jpg|png|gif|webp)$/,
           }),
         ],
         fileIsRequired: false,
@@ -155,7 +155,7 @@ export class PlotController {
         validators: [
           new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 }), // 5MB max
           new FileTypeValidator({
-            fileType: /(jpg|jpeg|png|gif|webp)$/,
+            fileType: /^image\/(jpeg|jpg|png|gif|webp)$/,
           }),
         ],
         fileIsRequired: false,

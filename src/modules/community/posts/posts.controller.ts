@@ -44,7 +44,7 @@ export class PostsController {
         validators: [
           new MaxFileSizeValidator({ maxSize: 10 * 1024 * 1024 }), // 10MB max per file
           new FileTypeValidator({
-            fileType: /(jpg|jpeg|png|gif|mp4|mov|avi|webm)$/,
+            fileType: /^(image\/(jpeg|jpg|png|gif|webp)|video\/(mp4|mov|avi|webm))$/,
           }),
         ],
         fileIsRequired: false,
@@ -118,7 +118,7 @@ export class PostsController {
         validators: [
           new MaxFileSizeValidator({ maxSize: 10 * 1024 * 1024 }), // 10MB max per file
           new FileTypeValidator({
-            fileType: /(jpg|jpeg|png|gif|mp4|mov|avi|webm)$/,
+            fileType: /^(image\/(jpeg|jpg|png|gif|webp)|video\/(mp4|mov|avi|webm))$/,
           }),
         ],
         fileIsRequired: false,
