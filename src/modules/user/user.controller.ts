@@ -97,7 +97,9 @@ export class UserController {
       new ParseFilePipe({
         validators: [
           new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 }), // 5MB max
-          new FileTypeValidator({ fileType: /(jpg|jpeg|png|webp)$/ }),
+          new FileTypeValidator({
+            fileType: /^image\/(jpeg|jpg|png|webp)$/,
+          }),
         ],
         fileIsRequired: false, // Profile pic is optional
       })
