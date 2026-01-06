@@ -12,7 +12,7 @@ export class LoginDto {
   email?: string;
 
   @IsOptional()
-  @IsPhoneNumber()
+  // @IsPhoneNumber()
   phoneNumber?: string;
 
   @IsString()

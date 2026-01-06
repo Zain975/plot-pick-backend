@@ -5,7 +5,7 @@ CREATE TYPE "DocumentType" AS ENUM ('DRIVER_LICENSE', 'PASSPORT', 'STATE_ID');
 CREATE TYPE "AccountPrivacy" AS ENUM ('PUBLIC', 'PRIVATE');
 
 -- CreateEnum
-CREATE TYPE "UserStatus" AS ENUM ('ACTIVE', 'LOCKED');
+CREATE TYPE "UserStatus" AS ENUM ('KYC_PENDING', 'ACTIVE', 'LOCKED');
 
 -- CreateEnum
 CREATE TYPE "OtpType" AS ENUM ('EMAIL_VERIFICATION', 'PHONE_VERIFICATION', 'LOGIN_EMAIL', 'LOGIN_PHONE');
@@ -51,7 +51,7 @@ CREATE TABLE "User" (
     "phoneVerifiedAt" TIMESTAMP(3),
     "identityVerifiedAt" TIMESTAMP(3),
     "signupStep" INTEGER NOT NULL DEFAULT 0,
-    "status" "UserStatus" NOT NULL DEFAULT 'ACTIVE',
+    "status" "UserStatus" NOT NULL DEFAULT 'KYC_PENDING',
     "plotPoints" INTEGER NOT NULL DEFAULT 0,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
