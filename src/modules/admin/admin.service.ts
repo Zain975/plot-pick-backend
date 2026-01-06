@@ -11,6 +11,7 @@ import { AddPlotPointsDto } from "./dto/add-plot-points.dto";
 import { Admin } from "./entities/admin.entity";
 import { JwtPayload } from "../../common/interfaces/jwt-payload.interface";
 import { OtpService, OtpType, OtpChannel } from "../otp/otp.service";
+import { PlotStatus } from "@prisma/client";
 
 const SALT_ROUNDS = 10;
 
@@ -270,16 +271,23 @@ export class AdminService {
   async getAllUsers(
     searchQuery?: string,
     page: number = 1,
-    limit: number = 20
+    limit: number = 20,
+    status?: string
   ) {
     try {
       const skip = (page - 1) * limit;
 
+      const where: any = {};
+
+      // Filter by status if provided
+      if (status && ["KYC_PENDING", "ACTIVE", "LOCKED"].includes(status)) {
+        where.status = status;
+      }
+
       // Build search condition if search query is provided
-      let searchCondition: any = {};
       if (searchQuery && searchQuery.trim().length > 0) {
         const query = searchQuery.trim();
-        searchCondition = {
+        const searchCondition = {
           OR: [
             { firstName: { contains: query, mode: "insensitive" as const } },
             { lastName: { contains: query, mode: "insensitive" as const } },
@@ -288,11 +296,19 @@ export class AdminService {
             { phoneNumber: { contains: query, mode: "insensitive" as const } },
           ],
         };
+
+        // Combine search with status filter
+        if (where.status) {
+          where.AND = [{ status: where.status }, searchCondition];
+          delete where.status;
+        } else {
+          Object.assign(where, searchCondition);
+        }
       }
 
       const [users, total] = await Promise.all([
         this.prisma.user.findMany({
-          where: searchCondition,
+          where,
           skip,
           take: limit,
           orderBy: { createdAt: "desc" },
@@ -309,7 +325,7 @@ export class AdminService {
           },
         }),
         this.prisma.user.count({
-          where: searchCondition,
+          where,
         }),
       ]);
 
@@ -376,6 +392,62 @@ export class AdminService {
       }
       throw new HttpException(
         error?.message || "Failed to fetch user details",
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  async getStats() {
+    try {
+      // Get user counts by status
+      const [activeUsers, lockedUsers, kycPendingUsers] = await Promise.all([
+        this.prisma.user.count({
+          where: { status: "ACTIVE" },
+        }),
+        this.prisma.user.count({
+          where: { status: "LOCKED" },
+        }),
+        this.prisma.user.count({
+          where: { status: "KYC_PENDING" },
+        }),
+      ]);
+
+      // Get plot counts by status
+      const [activePlots, inactivePlots, pausedPlots, resultsAnnouncedPlots] =
+        await Promise.all([
+          this.prisma.plot.count({
+            where: { status: PlotStatus.ACTIVE },
+          }),
+          this.prisma.plot.count({
+            where: { status: (PlotStatus as any).INACTIVE },
+          }),
+          this.prisma.plot.count({
+            where: { status: (PlotStatus as any).PAUSED },
+          }),
+          this.prisma.plot.count({
+            where: { status: PlotStatus.RESULTS_ANNOUNCED },
+          }),
+        ]);
+
+      return {
+        users: {
+          active: activeUsers,
+          locked: lockedUsers,
+          kycPending: kycPendingUsers,
+          total: activeUsers + lockedUsers + kycPendingUsers,
+        },
+        plots: {
+          active: activePlots,
+          inactive: inactivePlots,
+          paused: pausedPlots,
+          resultsAnnounced: resultsAnnouncedPlots,
+          total:
+            activePlots + inactivePlots + pausedPlots + resultsAnnouncedPlots,
+        },
+      };
+    } catch (error: any) {
+      throw new HttpException(
+        error?.message || "Failed to fetch stats",
         HttpStatus.INTERNAL_SERVER_ERROR
       );
     }
