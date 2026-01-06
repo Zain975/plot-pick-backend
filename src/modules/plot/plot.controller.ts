@@ -292,13 +292,14 @@ export class PlotController {
   @Get("admin/plots")
   async getAllPlots(
     @Query("status") status?: string,
+    @Query("search") search?: string,
     @Query("page") page?: string,
     @Query("limit") limit?: string
   ) {
     const pageNum = page ? parseInt(page, 10) : 1;
     const limitNum = limit ? parseInt(limit, 10) : 20;
     const plotStatus = status ? (status as PlotStatus) : undefined;
-    return this.plotService.getAllPlots(plotStatus, pageNum, limitNum);
+    return this.plotService.getAllPlots(plotStatus, pageNum, limitNum, search);
   }
 
   @UseGuards(AdminGuard)
