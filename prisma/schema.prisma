@@ -19,6 +19,7 @@ enum AccountPrivacy {
 }
 
 enum UserStatus {
+  KYC_PENDING
   ACTIVE
   LOCKED
 }
@@ -51,7 +52,7 @@ model User {
   phoneVerifiedAt    DateTime?
   identityVerifiedAt DateTime?
   signupStep         Int            @default(0)
-  status             UserStatus     @default(ACTIVE)
+  status             UserStatus     @default(KYC_PENDING)
   plotPoints         Int            @default(0)
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt

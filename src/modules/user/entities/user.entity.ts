@@ -1,6 +1,6 @@
 export type DocumentType = "DRIVER_LICENSE" | "PASSPORT" | "STATE_ID";
 export type AccountPrivacy = "PUBLIC" | "PRIVATE";
-export type UserStatus = "ACTIVE" | "LOCKED";
+export type UserStatus = "KYC_PENDING" | "ACTIVE" | "LOCKED";
 
 export interface User {
   id: string;

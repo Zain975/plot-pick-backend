@@ -114,11 +114,24 @@ export class AuthService {
         );
       }
 
+      // Get current user to check status
+      const currentUser = await this.prisma.user.findUnique({
+        where: { id: userId },
+      });
+
+      if (!currentUser) {
+        throw new HttpException("User not found", HttpStatus.NOT_FOUND);
+      }
+
       const user = await this.prisma.user.update({
         where: { id: userId },
         data: {
           emailVerifiedAt: new Date(),
           signupStep: 2,
+          // Status remains KYC_PENDING until all steps are complete (only if not LOCKED)
+          ...(currentUser.status !== "LOCKED" && {
+            status: "KYC_PENDING" as any,
+          }),
         },
       });
 
@@ -224,11 +237,24 @@ export class AuthService {
         );
       }
 
+      // Get current user to check status
+      const currentUser = await this.prisma.user.findUnique({
+        where: { id: userId },
+      });
+
+      if (!currentUser) {
+        throw new HttpException("User not found", HttpStatus.NOT_FOUND);
+      }
+
       const user = await this.prisma.user.update({
         where: { id: userId },
         data: {
           phoneVerifiedAt: new Date(),
           signupStep: 3,
+          // Status remains KYC_PENDING until step 3 is complete (only if not LOCKED)
+          ...(currentUser.status !== "LOCKED" && {
+            status: "KYC_PENDING" as any,
+          }),
         },
       });
 
@@ -324,6 +350,15 @@ export class AuthService {
         );
       }
 
+      // Get current user to check status
+      const currentUser = await this.prisma.user.findUnique({
+        where: { id: userId },
+      });
+
+      if (!currentUser) {
+        throw new HttpException("User not found", HttpStatus.NOT_FOUND);
+      }
+
       const user = await this.prisma.user.update({
         where: { id: userId },
         data: {
@@ -334,6 +369,10 @@ export class AuthService {
           documentBackUrl: documentBackUrl,
           identityVerifiedAt: new Date(),
           signupStep: 3,
+          // All steps complete - set status to ACTIVE (only if not LOCKED)
+          ...(currentUser.status !== "LOCKED" && {
+            status: "ACTIVE" as any,
+          }),
         },
       });
 
@@ -448,6 +487,14 @@ export class AuthService {
         throw new HttpException("User not found", HttpStatus.NOT_FOUND);
       }
 
+      // Check if user account is locked
+      if (user.status === "LOCKED") {
+        throw new HttpException(
+          "Your account is locked by the admin, kindly contact the admin",
+          HttpStatus.FORBIDDEN
+        );
+      }
+
       // Check if all verifications are complete
       const isEmailVerified = !!user.emailVerifiedAt;
       const isPhoneVerified = !!user.phoneVerifiedAt;
@@ -455,6 +502,30 @@ export class AuthService {
 
       const isFullyVerified =
         isEmailVerified && isPhoneVerified && isIdentityVerified;
+
+      // Update status based on signupStep (only if not LOCKED)
+      let updatedUser = user;
+      if (user.status !== "LOCKED") {
+        if (user.signupStep === 3 && user.status === "KYC_PENDING") {
+          // All steps complete - set status to ACTIVE
+          updatedUser = await this.prisma.user.update({
+            where: { id: userId },
+            data: {
+              status: "ACTIVE" as any,
+            },
+          });
+        } else if (user.signupStep < 3) {
+          // Steps not complete - ensure status is KYC_PENDING
+          if (user.status !== "KYC_PENDING") {
+            updatedUser = await this.prisma.user.update({
+              where: { id: userId },
+              data: {
+                status: "KYC_PENDING" as any,
+              },
+            });
+          }
+        }
+      }
 
       if (!isFullyVerified) {
         // Build message indicating what needs to be completed
@@ -468,22 +539,22 @@ export class AuthService {
         )}.`;
 
         return {
-          user: user as unknown as User,
+          user: updatedUser as unknown as User,
           message,
         };
       }
 
       // All verifications complete - issue access token
       const jwtPayload: JwtPayload = {
-        sub: user.id,
-        email: user.email,
+        sub: updatedUser.id,
+        email: updatedUser.email,
         role: "user",
       };
 
       const accessToken = this.jwtService.sign(jwtPayload);
 
       return {
-        user: user as unknown as User,
+        user: updatedUser as unknown as User,
         accessToken,
       };
     } catch (error: any) {
