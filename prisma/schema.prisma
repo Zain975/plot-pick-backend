@@ -214,9 +214,9 @@ enum QuestionType {
 }
 
 enum PlotStatus {
-  DRAFT
   ACTIVE
-  CLOSED
+  INACTIVE
+  PAUSED
   RESULTS_ANNOUNCED
 }
 
@@ -251,7 +251,7 @@ model Plot {
   activeStartTime   String     @db.VarChar(10) // HH:mm format
   closeEndDate      DateTime
   closeEndTime      String     @db.VarChar(10) // HH:mm format
-  status            PlotStatus @default(DRAFT)
+  status            PlotStatus @default(INACTIVE)
   createdAt         DateTime   @default(now())
   updatedAt         DateTime   @updatedAt
 

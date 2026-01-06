@@ -353,8 +353,8 @@ export class PlotController {
   // ==================== USER: Plot Viewing Endpoints ====================
 
   @UseGuards(UserGuard)
-  @Get("active")
-  async getActivePlots(
+  @Get("plots")
+  async getPlots(
     @Query("page") page?: string,
     @Query("limit") limit?: string,
     @Query("status") status?: string
@@ -362,7 +362,7 @@ export class PlotController {
     const pageNum = page ? parseInt(page, 10) : 1;
     const limitNum = limit ? parseInt(limit, 10) : 20;
     const plotStatus = status ? (status as PlotStatus) : undefined;
-    return this.plotService.getActivePlots(pageNum, limitNum, plotStatus);
+    return this.plotService.getPlots(pageNum, limitNum, plotStatus);
   }
 
   @UseGuards(UserGuard)

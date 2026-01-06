@@ -15,6 +15,59 @@ export class PlotService {
     private readonly s3Service: S3Service
   ) {}
 
+  /**
+   * Calculate plot status based on current date/time and plot's start/close dates
+   * ACTIVE: if current date/time is between start and close date/time
+   * INACTIVE: if start and end date/time are in the future
+   */
+  private calculatePlotStatus(
+    activeStartDate: Date,
+    activeStartTime: string,
+    closeEndDate: Date,
+    closeEndTime: string,
+    currentStatus?: PlotStatus
+  ): PlotStatus {
+    // If status is PAUSED or RESULTS_ANNOUNCED, don't change it automatically
+    if (currentStatus) {
+      if (
+        currentStatus === (PlotStatus as any).PAUSED ||
+        currentStatus === PlotStatus.RESULTS_ANNOUNCED
+      ) {
+        return currentStatus;
+      }
+    }
+
+    const now = new Date();
+    
+    // Parse time strings (HH:mm format) and combine with dates
+    const [startHours, startMinutes] = activeStartTime.split(":").map(Number);
+    const [closeHours, closeMinutes] = closeEndTime.split(":").map(Number);
+    
+    const startDateTime = new Date(activeStartDate);
+    startDateTime.setHours(startHours, startMinutes, 0, 0);
+    
+    const closeDateTime = new Date(closeEndDate);
+    closeDateTime.setHours(closeHours, closeMinutes, 0, 0);
+
+    // If current time is between start and close, it's ACTIVE
+    if (now >= startDateTime && now <= closeDateTime) {
+      return PlotStatus.ACTIVE;
+    }
+    
+    // If start time is in the future, it's INACTIVE
+    if (now < startDateTime) {
+      return (PlotStatus as any).INACTIVE;
+    }
+    
+    // If close time has passed, it's INACTIVE
+    if (now > closeDateTime) {
+      return (PlotStatus as any).INACTIVE;
+    }
+
+    // Default to INACTIVE
+    return (PlotStatus as any).INACTIVE;
+  }
+
   // ==================== ADMIN: Show + Episode Management ====================
 
   async createShowWithEpisode(data: CreateShowWithEpisodeDto): Promise<any> {
@@ -129,6 +182,12 @@ export class PlotService {
         }
 
         // Create episode (plot) for this show
+        const calculatedStatus = this.calculatePlotStatus(
+          new Date(data.activeStartDate),
+          data.activeStartTime,
+          new Date(data.closeEndDate),
+          data.closeEndTime
+        );
         const plot = await tx.plot.create({
           data: {
             showId: show.id,
@@ -139,7 +198,7 @@ export class PlotService {
             activeStartTime: data.activeStartTime,
             closeEndDate: new Date(data.closeEndDate),
             closeEndTime: data.closeEndTime,
-            status: PlotStatus.DRAFT,
+            status: calculatedStatus,
           },
         });
 
@@ -350,6 +409,38 @@ export class PlotService {
         if (data.closeEndTime !== undefined)
           plotUpdateData.closeEndTime = data.closeEndTime;
 
+        // Recalculate status if dates/times changed and plot is not PAUSED or RESULTS_ANNOUNCED
+        const finalStartDate = data.activeStartDate
+          ? new Date(data.activeStartDate)
+          : existingPlot.activeStartDate;
+        const finalStartTime = data.activeStartTime
+          ? data.activeStartTime
+          : existingPlot.activeStartTime;
+        const finalCloseDate = data.closeEndDate
+          ? new Date(data.closeEndDate)
+          : existingPlot.closeEndDate;
+        const finalCloseTime = data.closeEndTime
+          ? data.closeEndTime
+          : existingPlot.closeEndTime;
+
+        if (
+          existingPlot.status !== (PlotStatus as any).PAUSED &&
+          existingPlot.status !== (PlotStatus as any).RESULTS_ANNOUNCED &&
+          (data.activeStartDate ||
+            data.activeStartTime ||
+            data.closeEndDate ||
+            data.closeEndTime)
+        ) {
+          const calculatedStatus = this.calculatePlotStatus(
+            finalStartDate,
+            finalStartTime,
+            finalCloseDate,
+            finalCloseTime,
+            existingPlot.status
+          );
+          plotUpdateData.status = calculatedStatus;
+        }
+
         // Update show and plot in transaction
         const [updatedShow, updatedPlot] = await this.prisma.$transaction([
           this.prisma.show.update({
@@ -423,6 +514,12 @@ export class PlotService {
             data: showUpdateData,
           });
 
+          const calculatedStatus = this.calculatePlotStatus(
+            new Date(activeStartDate),
+            activeStartTime,
+            new Date(closeEndDate),
+            closeEndTime
+          );
           const newPlot = await tx.plot.create({
             data: {
               showId: showId,
@@ -433,7 +530,7 @@ export class PlotService {
               activeStartTime: activeStartTime,
               closeEndDate: new Date(closeEndDate),
               closeEndTime: closeEndTime,
-              status: PlotStatus.DRAFT,
+              status: calculatedStatus,
             },
           });
 
@@ -730,6 +827,12 @@ export class PlotService {
         const nextEpisodeNumber =
           existingPlots.length > 0 ? existingPlots[0].episodeNumber + 1 : 1;
 
+        const calculatedStatus = this.calculatePlotStatus(
+          new Date(data.activeStartDate),
+          data.activeStartTime,
+          new Date(data.closeEndDate),
+          data.closeEndTime
+        );
         const newPlot = await tx.plot.create({
           data: {
             showId: data.showId,
@@ -740,7 +843,7 @@ export class PlotService {
             activeStartTime: data.activeStartTime,
             closeEndDate: new Date(data.closeEndDate),
             closeEndTime: data.closeEndTime,
-            status: PlotStatus.DRAFT,
+            status: calculatedStatus,
           },
         });
 
@@ -902,6 +1005,38 @@ export class PlotService {
       if (data.closeEndTime !== undefined)
         updateData.closeEndTime = data.closeEndTime;
 
+      // Recalculate status if dates/times changed and plot is not PAUSED or RESULTS_ANNOUNCED
+      const finalStartDate = data.activeStartDate
+        ? new Date(data.activeStartDate)
+        : plot.activeStartDate;
+      const finalStartTime = data.activeStartTime
+        ? data.activeStartTime
+        : plot.activeStartTime;
+      const finalCloseDate = data.closeEndDate
+        ? new Date(data.closeEndDate)
+        : plot.closeEndDate;
+      const finalCloseTime = data.closeEndTime
+        ? data.closeEndTime
+        : plot.closeEndTime;
+
+      if (
+        plot.status !== (PlotStatus as any).PAUSED &&
+        plot.status !== (PlotStatus as any).RESULTS_ANNOUNCED &&
+        (data.activeStartDate ||
+          data.activeStartTime ||
+          data.closeEndDate ||
+          data.closeEndTime)
+      ) {
+        const calculatedStatus = this.calculatePlotStatus(
+          finalStartDate,
+          finalStartTime,
+          finalCloseDate,
+          finalCloseTime,
+          plot.status
+        );
+        updateData.status = calculatedStatus;
+      }
+
       const updatedPlot = await this.prisma.plot.update({
         where: { id: plotId },
         data: updateData,
@@ -1009,6 +1144,7 @@ export class PlotService {
         throw new HttpException("Question not found", HttpStatus.NOT_FOUND);
       }
 
+      // Unpause the question (this only affects the question, not the plot)
       await this.prisma.question.update({
         where: { id: questionId },
         data: { isPaused: false },
@@ -1129,7 +1265,7 @@ export class PlotService {
         throw new HttpException("Plot not found", HttpStatus.NOT_FOUND);
       }
 
-      // Validate status transitions
+      // Cannot change status if results are already announced
       if (
         plot.status === PlotStatus.RESULTS_ANNOUNCED &&
         status !== PlotStatus.RESULTS_ANNOUNCED
@@ -1140,9 +1276,41 @@ export class PlotService {
         );
       }
 
+      let finalStatus: PlotStatus;
+
+      // Handle different status update scenarios
+      if (status === (PlotStatus as any).PAUSED) {
+        // Admin wants to pause the plot
+        finalStatus = (PlotStatus as any).PAUSED;
+      } else if (status === PlotStatus.RESULTS_ANNOUNCED) {
+        // Admin wants to set results as announced
+        finalStatus = PlotStatus.RESULTS_ANNOUNCED;
+      } else {
+        // Admin wants to unpause (if currently PAUSED) or set ACTIVE/INACTIVE
+        // Recalculate status based on date/time
+        if (plot.status === (PlotStatus as any).PAUSED) {
+          // Unpausing: recalculate based on date/time
+          finalStatus = this.calculatePlotStatus(
+            plot.activeStartDate,
+            plot.activeStartTime,
+            plot.closeEndDate,
+            plot.closeEndTime
+          );
+        } else {
+          // Setting to ACTIVE or INACTIVE: recalculate based on date/time
+          finalStatus = this.calculatePlotStatus(
+            plot.activeStartDate,
+            plot.activeStartTime,
+            plot.closeEndDate,
+            plot.closeEndTime,
+            plot.status
+          );
+        }
+      }
+
       const updatedPlot = await this.prisma.plot.update({
         where: { id: plotId },
-        data: { status },
+        data: { status: finalStatus },
         include: {
           show: true,
           questions: {
@@ -1244,14 +1412,13 @@ export class PlotService {
 
   // ==================== USER: Plot Viewing ====================
 
-  async getActivePlots(
+  async getPlots(
     page: number = 1,
     limit: number = 20,
     status?: PlotStatus
   ) {
     try {
       const skip = (page - 1) * limit;
-      const now = new Date();
 
       // Build where clause
       const where: any = {};
@@ -1259,17 +1426,8 @@ export class PlotService {
       // If status filter is provided, use it
       if (status) {
         where.status = status;
-        // For ACTIVE plots, also check date/time constraints
-        // if (status === PlotStatus.ACTIVE) {
-        //   where.activeStartDate = { lte: now };
-        //   where.closeEndDate = { gte: now };
-        // }
-      } else {
-        // By default, exclude DRAFT plots (show ACTIVE, CLOSED, RESULTS_ANNOUNCED)
-        where.status = {
-          not: PlotStatus.DRAFT,
-        };
       }
+      // If no status filter, show all plots (ACTIVE, INACTIVE, PAUSED, RESULTS_ANNOUNCED)
 
       const [plots, total] = await Promise.all([
         this.prisma.plot.findMany({
