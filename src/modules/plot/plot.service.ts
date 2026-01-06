@@ -38,14 +38,14 @@ export class PlotService {
     }
 
     const now = new Date();
-    
+
     // Parse time strings (HH:mm format) and combine with dates
     const [startHours, startMinutes] = activeStartTime.split(":").map(Number);
     const [closeHours, closeMinutes] = closeEndTime.split(":").map(Number);
-    
+
     const startDateTime = new Date(activeStartDate);
     startDateTime.setHours(startHours, startMinutes, 0, 0);
-    
+
     const closeDateTime = new Date(closeEndDate);
     closeDateTime.setHours(closeHours, closeMinutes, 0, 0);
 
@@ -53,12 +53,12 @@ export class PlotService {
     if (now >= startDateTime && now <= closeDateTime) {
       return PlotStatus.ACTIVE;
     }
-    
+
     // If start time is in the future, it's INACTIVE
     if (now < startDateTime) {
       return (PlotStatus as any).INACTIVE;
     }
-    
+
     // If close time has passed, it's INACTIVE
     if (now > closeDateTime) {
       return (PlotStatus as any).INACTIVE;
@@ -1335,13 +1335,30 @@ export class PlotService {
     }
   }
 
-  async getAllPlots(status?: PlotStatus, page: number = 1, limit: number = 20) {
+  async getAllPlots(
+    status?: PlotStatus,
+    page: number = 1,
+    limit: number = 20,
+    search?: string
+  ) {
     try {
       const skip = (page - 1) * limit;
 
       const where: any = {};
+
+      // Filter by status if provided
       if (status) {
         where.status = status;
+      }
+
+      // Filter by search (show title) if provided
+      if (search && search.trim()) {
+        where.show = {
+          title: {
+            contains: search.trim(),
+            mode: "insensitive",
+          },
+        };
       }
 
       const [plots, total] = await Promise.all([
@@ -1412,11 +1429,7 @@ export class PlotService {
 
   // ==================== USER: Plot Viewing ====================
 
-  async getPlots(
-    page: number = 1,
-    limit: number = 20,
-    status?: PlotStatus
-  ) {
+  async getPlots(page: number = 1, limit: number = 20, status?: PlotStatus) {
     try {
       const skip = (page - 1) * limit;
 
