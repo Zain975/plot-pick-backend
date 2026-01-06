@@ -1163,6 +1163,62 @@ export class PlotService {
     }
   }
 
+  async deleteQuestion(questionId: string): Promise<{ message: string }> {
+    try {
+      const question = await this.prisma.question.findUnique({
+        where: { id: questionId },
+        include: {
+          plot: true,
+        },
+      });
+
+      if (!question) {
+        throw new HttpException("Question not found", HttpStatus.NOT_FOUND);
+      }
+
+      // Check if any user has predicted on this question
+      const hasPredictions = await this.prisma.questionPrediction.findFirst({
+        where: { questionId },
+      });
+
+      if (hasPredictions) {
+        throw new HttpException(
+          "Cannot delete question that has predictions. Users have already bet on this question.",
+          HttpStatus.BAD_REQUEST
+        );
+      }
+
+      // Delete question and update plot's numberOfQuestions in a transaction
+      await this.prisma.$transaction(async (tx) => {
+        // Delete the question (cascade will handle options)
+        await tx.question.delete({
+          where: { id: questionId },
+        });
+
+        // Update plot's numberOfQuestions
+        const remainingQuestions = await tx.question.count({
+          where: { plotId: question.plotId },
+        });
+
+        await tx.plot.update({
+          where: { id: question.plotId },
+          data: { numberOfQuestions: remainingQuestions },
+        });
+      });
+
+      return { message: "Question deleted successfully" };
+    } catch (error: any) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      console.error("Delete question error:", error);
+      throw new HttpException(
+        error?.message || "Failed to delete question",
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
   async announceResults(data: AnnounceResultsDto): Promise<any> {
     try {
       const plot = await this.prisma.plot.findUnique({

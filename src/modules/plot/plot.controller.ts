@@ -337,6 +337,12 @@ export class PlotController {
   }
 
   @UseGuards(AdminGuard)
+  @Delete("admin/questions/:questionId")
+  async deleteQuestion(@Param("questionId") questionId: string) {
+    return this.plotService.deleteQuestion(questionId);
+  }
+
+  @UseGuards(AdminGuard)
   @Post("admin/plots/announce-results")
   async announceResults(
     @Body(
