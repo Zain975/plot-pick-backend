@@ -23,6 +23,7 @@ import { PlotService } from "./plot.service";
 import { CreateShowWithEpisodeDto } from "./dto/admin/create-show-with-episode.dto";
 import { UpdateShowWithEpisodeDto } from "./dto/admin/update-show-with-episode.dto";
 import { AnnounceResultsDto } from "./dto/admin/announce-results.dto";
+import { UpdateQuestionDto } from "./dto/admin/update-question.dto";
 import { UpdatePlotStatusDto } from "./dto/admin/update-plot-status.dto";
 import { CreatePredictionDto } from "./dto/user/create-prediction.dto";
 import { UpdatePredictionDto } from "./dto/user/update-prediction.dto";
@@ -340,6 +341,22 @@ export class PlotController {
   @Delete("admin/questions/:questionId")
   async deleteQuestion(@Param("questionId") questionId: string) {
     return this.plotService.deleteQuestion(questionId);
+  }
+
+  @UseGuards(AdminGuard)
+  @Patch("admin/questions/:questionId")
+  async updateQuestion(
+    @Param("questionId") questionId: string,
+    @Body(
+      new ValidationPipe({
+        whitelist: true,
+        transform: true,
+        forbidNonWhitelisted: false,
+      })
+    )
+    body: UpdateQuestionDto
+  ) {
+    return this.plotService.updateQuestion(questionId, body);
   }
 
   @UseGuards(AdminGuard)

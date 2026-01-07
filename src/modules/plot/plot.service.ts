@@ -6,6 +6,7 @@ import { UpdateShowWithEpisodeDto } from "./dto/admin/update-show-with-episode.d
 import { AnnounceResultsDto } from "./dto/admin/announce-results.dto";
 import { CreatePredictionDto } from "./dto/user/create-prediction.dto";
 import { UpdatePredictionDto } from "./dto/user/update-prediction.dto";
+import { UpdateQuestionDto } from "./dto/admin/update-question.dto";
 import { PlotStatus, PlotType, QuestionType } from "@prisma/client";
 
 @Injectable()
@@ -90,9 +91,9 @@ export class PlotService {
             );
           }
         } else if (question.type === QuestionType.MULTIPLE_CHOICE) {
-          if (question.options.length !== 4) {
+          if (question.options.length < 2) {
             throw new HttpException(
-              "MULTIPLE_CHOICE questions must have exactly 4 options",
+              "MULTIPLE_CHOICE questions must have at least 2 options",
               HttpStatus.BAD_REQUEST
             );
           }
@@ -358,9 +359,9 @@ export class PlotService {
                 );
               }
             } else if (question.type === QuestionType.MULTIPLE_CHOICE) {
-              if (question.options.length !== 4) {
+              if (question.options.length < 2) {
                 throw new HttpException(
-                  "MULTIPLE_CHOICE questions must have exactly 4 options",
+                  "MULTIPLE_CHOICE questions must have at least 2 options",
                   HttpStatus.BAD_REQUEST
                 );
               }
@@ -1214,6 +1215,129 @@ export class PlotService {
       console.error("Delete question error:", error);
       throw new HttpException(
         error?.message || "Failed to delete question",
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  async updateQuestion(
+    questionId: string,
+    data: UpdateQuestionDto
+  ): Promise<any> {
+    try {
+      const question = await this.prisma.question.findUnique({
+        where: { id: questionId },
+        include: {
+          plot: true,
+          options: {
+            orderBy: { order: "asc" },
+          },
+        },
+      });
+
+      if (!question) {
+        throw new HttpException("Question not found", HttpStatus.NOT_FOUND);
+      }
+
+      // Check if any user has predicted on this question
+      const hasPredictions = await this.prisma.questionPrediction.findFirst({
+        where: { questionId },
+      });
+
+      if (hasPredictions) {
+        throw new HttpException(
+          "Cannot update question that has predictions. Users have already bet on this question.",
+          HttpStatus.BAD_REQUEST
+        );
+      }
+
+      // Validate question options if provided
+      if (data.options && data.options.length > 0) {
+        if (data.type || question.type) {
+          const questionType = data.type || question.type;
+
+          if (questionType === QuestionType.YES_NO) {
+            if (data.options.length !== 2) {
+              throw new HttpException(
+                "YES_NO questions must have exactly 2 options",
+                HttpStatus.BAD_REQUEST
+              );
+            }
+          } else if (questionType === QuestionType.MULTIPLE_CHOICE) {
+            if (data.options.length < 2) {
+              throw new HttpException(
+                "MULTIPLE_CHOICE questions must have at least 2 options",
+                HttpStatus.BAD_REQUEST
+              );
+            }
+          }
+        }
+      }
+
+      // Update question and options in a transaction
+      const updatedQuestion = await this.prisma.$transaction(async (tx) => {
+        // Update question fields
+        const questionUpdateData: any = {};
+        if (data.questionText !== undefined) {
+          questionUpdateData.questionText = data.questionText;
+        }
+        if (data.type !== undefined) {
+          questionUpdateData.type = data.type;
+        }
+        if (data.order !== undefined) {
+          questionUpdateData.order = data.order;
+        }
+
+        const updated = await tx.question.update({
+          where: { id: questionId },
+          data: questionUpdateData,
+        });
+
+        // Update options if provided
+        if (data.options && data.options.length > 0) {
+          // Delete existing options
+          await tx.questionOption.deleteMany({
+            where: { questionId },
+          });
+
+          // Create new options
+          for (const optionData of data.options) {
+            await tx.questionOption.create({
+              data: {
+                questionId,
+                optionText: optionData.optionText!,
+                order: optionData.order!,
+              },
+            });
+          }
+        }
+
+        return updated;
+      });
+
+      // Fetch complete updated question with options
+      const completeQuestion = await this.prisma.question.findUnique({
+        where: { id: questionId },
+        include: {
+          plot: {
+            include: {
+              show: true,
+            },
+          },
+          options: {
+            orderBy: { order: "asc" },
+          },
+        },
+      });
+
+      return completeQuestion;
+    } catch (error: any) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      console.error("Update question error:", error);
+      throw new HttpException(
+        error?.message || "Failed to update question",
         HttpStatus.INTERNAL_SERVER_ERROR
       );
     }
