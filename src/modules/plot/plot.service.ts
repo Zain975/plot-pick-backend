@@ -2466,18 +2466,29 @@ export class PlotService {
     try {
       const skip = (page - 1) * limit;
 
-      // Get all plot IDs where user has made predictions
-      const plotPredictions = await this.prisma.plotPrediction.findMany({
+      // Get all plot predictions ordered by most recent prediction first
+      // Use a subquery to get the most recent prediction per plot
+      const allPlotPredictions = await this.prisma.plotPrediction.findMany({
         where: { userId },
         select: {
           plotId: true,
+          createdAt: true,
         },
-        distinct: ["plotId"],
+        orderBy: { createdAt: "desc" },
       });
 
-      const plotIds = plotPredictions.map((p) => p.plotId);
+      // Get unique plotIds in order of most recent prediction
+      const seenPlotIds = new Set<string>();
+      const orderedPlotIds: string[] = [];
 
-      if (plotIds.length === 0) {
+      for (const prediction of allPlotPredictions) {
+        if (!seenPlotIds.has(prediction.plotId)) {
+          seenPlotIds.add(prediction.plotId);
+          orderedPlotIds.push(prediction.plotId);
+        }
+      }
+
+      if (orderedPlotIds.length === 0) {
         return {
           plots: [],
           total: 0,
@@ -2487,50 +2498,53 @@ export class PlotService {
         };
       }
 
-      const [plots, total] = await Promise.all([
-        this.prisma.plot.findMany({
-          where: {
-            id: { in: plotIds },
-          },
-          skip,
-          take: limit,
-          orderBy: { createdAt: "desc" },
-          include: {
-            show: true,
-            questions: {
-              include: {
-                options: true,
-                correctOption: true,
-              },
-              orderBy: { order: "asc" },
+      // Fetch all plots (we'll sort and paginate in memory)
+      const allPlots = await this.prisma.plot.findMany({
+        where: {
+          id: { in: orderedPlotIds },
+        },
+        include: {
+          show: true,
+          questions: {
+            include: {
+              options: true,
+              correctOption: true,
             },
-            plotPredictions: {
-              where: { userId },
-              include: {
-                questionPredictions: {
-                  include: {
-                    question: true,
-                    option: true,
-                  },
+            orderBy: { order: "asc" },
+          },
+          plotPredictions: {
+            where: { userId },
+            include: {
+              questionPredictions: {
+                include: {
+                  question: true,
+                  option: true,
                 },
               },
             },
           },
-        }),
-        this.prisma.plot.count({
-          where: {
-            id: { in: plotIds },
-          },
-        }),
-      ]);
+        },
+      });
+
+      // Create a map for quick lookup
+      const plotMap = new Map(allPlots.map((plot) => [plot.id, plot]));
+
+      // Sort plots by the order of orderedPlotIds (most recent predictions first)
+      const sortedPlots = orderedPlotIds
+        .map((plotId) => plotMap.get(plotId))
+        .filter((plot): plot is (typeof allPlots)[0] => plot !== undefined);
+
+      // Apply pagination after sorting
+      const paginatedPlots = sortedPlots.slice(skip, skip + limit);
+      const total = orderedPlotIds.length;
 
       // Sort question predictions by question order for each plot prediction
-      plots.forEach((plot) => {
+      paginatedPlots.forEach((plot) => {
         if (plot.plotPredictions && plot.plotPredictions.length > 0) {
-          plot.plotPredictions.forEach((plotPrediction) => {
+          plot.plotPredictions.forEach((plotPrediction: any) => {
             if (plotPrediction.questionPredictions) {
               plotPrediction.questionPredictions.sort(
-                (a, b) => a.question.order - b.question.order
+                (a: any, b: any) => a.question.order - b.question.order
               );
             }
           });
@@ -2539,7 +2553,7 @@ export class PlotService {
 
       // Get total predictions count for each plot
       const plotsWithTotalCounts = await Promise.all(
-        plots.map(async (plot) => {
+        paginatedPlots.map(async (plot) => {
           const totalPredictions = await this.prisma.plotPrediction.count({
             where: { plotId: plot.id },
           });
