@@ -248,9 +248,9 @@ model Plot {
   episodeNumber     Int // Episode number (1, 2, 3, etc.)
   type              PlotType
   numberOfQuestions Int
-  activeStartDate   DateTime
+  activeStartDate   DateTime   @db.Date // Date only (YYYY-MM-DD)
   activeStartTime   String     @db.VarChar(10) // HH:mm format
-  closeEndDate      DateTime
+  closeEndDate      DateTime   @db.Date // Date only (YYYY-MM-DD)
   closeEndTime      String     @db.VarChar(10) // HH:mm format
   status            PlotStatus @default(INACTIVE)
   createdAt         DateTime   @default(now())
