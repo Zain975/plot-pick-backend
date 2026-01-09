@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "Plot" ALTER COLUMN "activeStartDate" SET DATA TYPE DATE,
+ALTER COLUMN "closeEndDate" SET DATA TYPE DATE;
