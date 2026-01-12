@@ -344,6 +344,45 @@ export class AdminService {
     }
   }
 
+  /**
+   * Calculate prediction status and accuracy
+   */
+  private calculatePredictionStats(
+    plotStatus: PlotStatus,
+    questionPredictions: any[],
+    questions: any[]
+  ): { status: "won" | "lost" | "pending"; accuracy: number } {
+    // If results not announced, status is pending
+    if (plotStatus !== PlotStatus.RESULTS_ANNOUNCED) {
+      return { status: "pending", accuracy: 0 };
+    }
+
+    // Calculate accuracy
+    let correctCount = 0;
+    const totalQuestions = questions.length;
+
+    for (const question of questions) {
+      if (!question.correctOptionId) continue;
+
+      const userPrediction = questionPredictions.find(
+        (qp) => qp.questionId === question.id
+      );
+
+      if (
+        userPrediction &&
+        userPrediction.optionId === question.correctOptionId
+      ) {
+        correctCount++;
+      }
+    }
+
+    const accuracy =
+      totalQuestions > 0 ? (correctCount / totalQuestions) * 100 : 0;
+    const status = accuracy >= 60 ? "won" : "lost";
+
+    return { status, accuracy };
+  }
+
   async getUserDetails(userId: string) {
     try {
       const user = await this.prisma.user.findUnique({
@@ -385,7 +424,139 @@ export class AdminService {
         throw new HttpException("User not found", HttpStatus.NOT_FOUND);
       }
 
-      return user;
+      // Get all predictions with full details
+      const predictions = await this.prisma.plotPrediction.findMany({
+        where: { userId },
+        include: {
+          plot: {
+            include: {
+              show: true,
+              questions: {
+                include: {
+                  options: true,
+                  correctOption: true,
+                },
+                orderBy: { order: "asc" },
+              },
+            },
+          },
+          questionPredictions: {
+            include: {
+              question: {
+                include: {
+                  options: true,
+                  correctOption: true,
+                },
+              },
+              option: true,
+            },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+
+      // Calculate statistics
+      const totalPredictions = predictions.length;
+      let pendingPredictions = 0;
+      let wonCount = 0;
+      let totalAccuracy = 0;
+      let completedPredictions = 0;
+
+      // Process predictions array with status and details
+      const predictionsArray = predictions.map((prediction) => {
+        const { status, accuracy } = this.calculatePredictionStats(
+          prediction.plot.status,
+          prediction.questionPredictions,
+          prediction.plot.questions
+        );
+
+        if (status === "pending") {
+          pendingPredictions++;
+        } else {
+          completedPredictions++;
+          totalAccuracy += accuracy;
+          if (status === "won") {
+            wonCount++;
+          }
+        }
+
+        // Build questions array with user predictions and correct answers
+        const questionsWithPredictions = prediction.plot.questions.map(
+          (question) => {
+            const userQuestionPrediction = prediction.questionPredictions.find(
+              (qp) => qp.questionId === question.id
+            );
+
+            return {
+              id: question.id,
+              questionText: question.questionText,
+              type: question.type,
+              order: question.order,
+              options: question.options.map((opt) => ({
+                id: opt.id,
+                optionText: opt.optionText,
+                order: opt.order,
+              })),
+              userPredictedOptionId: userQuestionPrediction?.optionId || null,
+              correctOptionId: question.correctOptionId || null,
+            };
+          }
+        );
+
+        return {
+          id: prediction.id,
+          show: {
+            id: prediction.plot.show.id,
+            title: prediction.plot.show.title,
+            seasonNumber: prediction.plot.show.seasonNumber,
+            description: prediction.plot.show.description,
+            thumbnailUrl: prediction.plot.show.thumbnailUrl,
+            minimumAmount: prediction.plot.show.minimumAmount,
+            maximumAmount: prediction.plot.show.maximumAmount,
+            payoutAmount: prediction.plot.show.payoutAmount,
+            plotpicksVig: prediction.plot.show.plotpicksVig,
+            bonusKicker: prediction.plot.show.bonusKicker,
+            bonusAmount: prediction.plot.show.bonusAmount,
+          },
+          plot: {
+            id: prediction.plot.id,
+            episodeNumber: prediction.plot.episodeNumber,
+            type: prediction.plot.type,
+            numberOfQuestions: prediction.plot.numberOfQuestions,
+            activeStartDate: prediction.plot.activeStartDate,
+            activeStartTime: prediction.plot.activeStartTime,
+            closeEndDate: prediction.plot.closeEndDate,
+            closeEndTime: prediction.plot.closeEndTime,
+            status: prediction.plot.status,
+            questions: questionsWithPredictions,
+          },
+          totalQuestions: prediction.plot.numberOfQuestions,
+          predictionDate: prediction.createdAt,
+          status,
+          accuracy:
+            status === "pending" ? null : parseFloat(accuracy.toFixed(2)),
+          predictedAmount: prediction.predictedAmount,
+        };
+      });
+
+      // Calculate win rate and average accuracy
+      const winRate =
+        completedPredictions > 0
+          ? parseFloat(((wonCount / completedPredictions) * 100).toFixed(2))
+          : 0;
+      const averageAccuracy =
+        completedPredictions > 0
+          ? parseFloat((totalAccuracy / completedPredictions).toFixed(2))
+          : 0;
+
+      return {
+        ...user,
+        totalPredictions,
+        winRate,
+        accuracy: averageAccuracy,
+        pendingPredictions,
+        predictions: predictionsArray,
+      };
     } catch (error: any) {
       if (error instanceof HttpException) {
         throw error;

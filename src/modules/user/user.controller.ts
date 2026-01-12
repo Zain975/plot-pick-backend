@@ -146,4 +146,11 @@ export class UserController {
     const currentUserId = req.user.id;
     return this.userService.getProfile(id, currentUserId);
   }
+
+  @UseGuards(UserGuard)
+  @Get("me/predictions")
+  async getMyPredictionDetails(@Request() req: any) {
+    const userId = req.user.id;
+    return this.userService.getMyPredictionDetails(userId);
+  }
 }
