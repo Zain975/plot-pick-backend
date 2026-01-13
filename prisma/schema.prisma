@@ -218,6 +218,7 @@ enum PlotStatus {
   ACTIVE
   INACTIVE
   PAUSED
+  CLOSED
   RESULTS_ANNOUNCED
 }
 

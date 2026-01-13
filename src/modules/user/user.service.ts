@@ -693,6 +693,7 @@ export class UserService {
       const totalPredictions = predictions.length;
       let pendingPredictions = 0;
       let wonCount = 0;
+      let lostCount = 0;
       let totalAccuracy = 0;
       let completedPredictions = 0;
 
@@ -711,6 +712,8 @@ export class UserService {
           totalAccuracy += accuracy;
           if (status === "won") {
             wonCount++;
+          } else if (status === "lost") {
+            lostCount++;
           }
         }
 
@@ -789,6 +792,8 @@ export class UserService {
         winRate,
         accuracy: averageAccuracy,
         pendingPredictions,
+        wonPredictions: wonCount,
+        lostPredictions: lostCount,
         predictions: predictionsArray,
       };
     } catch (error: any) {

@@ -20,6 +20,7 @@ export class PlotService {
    * Calculate plot status based on current date/time and plot's start/close dates
    * ACTIVE: if current date/time is between start and close date/time
    * INACTIVE: if start and end date/time are in the future
+   * CLOSED: if close time has passed and status is not RESULTS_ANNOUNCED
    */
   private calculatePlotStatus(
     activeStartDate: Date,
@@ -60,9 +61,9 @@ export class PlotService {
       return (PlotStatus as any).INACTIVE;
     }
 
-    // If close time has passed, it's INACTIVE
+    // If close time has passed and status is not RESULTS_ANNOUNCED, it's CLOSED
     if (now > closeDateTime) {
-      return (PlotStatus as any).INACTIVE;
+      return (PlotStatus as any).CLOSED;
     }
 
     // Default to INACTIVE
@@ -499,9 +500,9 @@ export class PlotService {
               );
             }
           } else if (question.type === QuestionType.MULTIPLE_CHOICE) {
-            if (question.options.length !== 4) {
+            if (question.options.length < 2) {
               throw new HttpException(
-                "MULTIPLE_CHOICE questions must have exactly 4 options",
+                "MULTIPLE_CHOICE questions must have at least 2 options",
                 HttpStatus.BAD_REQUEST
               );
             }
@@ -798,9 +799,9 @@ export class PlotService {
             );
           }
         } else if (question.type === QuestionType.MULTIPLE_CHOICE) {
-          if (question.options.length !== 4) {
+          if (question.options.length < 2) {
             throw new HttpException(
-              "MULTIPLE_CHOICE questions must have exactly 4 options",
+              "MULTIPLE_CHOICE questions must have at least 2 options",
               HttpStatus.BAD_REQUEST
             );
           }
@@ -954,9 +955,9 @@ export class PlotService {
               );
             }
           } else if (question.type === QuestionType.MULTIPLE_CHOICE) {
-            if (question.options.length !== 4) {
+            if (question.options.length < 2) {
               throw new HttpException(
-                "MULTIPLE_CHOICE questions must have exactly 4 options",
+                "MULTIPLE_CHOICE questions must have at least 2 options",
                 HttpStatus.BAD_REQUEST
               );
             }
@@ -1620,7 +1621,7 @@ export class PlotService {
       if (status) {
         where.status = status;
       }
-      // If no status filter, show all plots (ACTIVE, INACTIVE, PAUSED, RESULTS_ANNOUNCED)
+      // If no status filter, show all plots (ACTIVE, INACTIVE, PAUSED, CLOSED, RESULTS_ANNOUNCED)
 
       const [plots, total] = await Promise.all([
         this.prisma.plot.findMany({
@@ -1644,6 +1645,33 @@ export class PlotService {
         }),
         this.prisma.plot.count({ where }),
       ]);
+
+      // Recalculate and update status for plots if needed (auto-close when end date passed)
+      const currentTime = new Date();
+      for (const plot of plots) {
+        if (
+          plot.status !== PlotStatus.RESULTS_ANNOUNCED &&
+          plot.status !== (PlotStatus as any).PAUSED
+        ) {
+          const [closeHours, closeMinutes] = plot.closeEndTime
+            .split(":")
+            .map(Number);
+          const closeDateTime = new Date(plot.closeEndDate);
+          closeDateTime.setHours(closeHours, closeMinutes, 0, 0);
+
+          if (
+            currentTime > closeDateTime &&
+            plot.status !== (PlotStatus as any).CLOSED
+          ) {
+            // Update status to CLOSED in database
+            await this.prisma.plot.update({
+              where: { id: plot.id },
+              data: { status: (PlotStatus as any).CLOSED },
+            });
+            plot.status = (PlotStatus as any).CLOSED;
+          }
+        }
+      }
 
       // Get total predictions count for each plot
       const plotsWithPredictions = await Promise.all(
@@ -1719,6 +1747,31 @@ export class PlotService {
 
       if (!plot) {
         throw new HttpException("Plot not found", HttpStatus.NOT_FOUND);
+      }
+
+      // Recalculate and update status if needed (auto-close when end date passed)
+      const currentTime = new Date();
+      if (
+        plot.status !== PlotStatus.RESULTS_ANNOUNCED &&
+        plot.status !== (PlotStatus as any).PAUSED
+      ) {
+        const [closeHours, closeMinutes] = plot.closeEndTime
+          .split(":")
+          .map(Number);
+        const closeDateTime = new Date(plot.closeEndDate);
+        closeDateTime.setHours(closeHours, closeMinutes, 0, 0);
+
+        if (
+          currentTime > closeDateTime &&
+          plot.status !== (PlotStatus as any).CLOSED
+        ) {
+          // Update status to CLOSED in database
+          await this.prisma.plot.update({
+            where: { id: plot.id },
+            data: { status: (PlotStatus as any).CLOSED },
+          });
+          plot.status = (PlotStatus as any).CLOSED;
+        }
       }
 
       // Build episode IDs object (episode1Id, episode2Id, etc.)
@@ -1871,6 +1924,7 @@ export class PlotService {
       const now = new Date();
       if (
         plot.status !== PlotStatus.ACTIVE ||
+        plot.status === (PlotStatus as any).CLOSED ||
         plot.activeStartDate > now ||
         plot.closeEndDate < now
       ) {
@@ -2071,14 +2125,16 @@ export class PlotService {
       }
 
       // Check if plot is still active and within time window (before close end date/time)
+      // Users cannot update predictions on CLOSED plots
       const now = new Date();
       if (
         plot.status !== PlotStatus.ACTIVE ||
+        plot.status === (PlotStatus as any).CLOSED ||
         plot.activeStartDate > now ||
         plot.closeEndDate < now
       ) {
         throw new HttpException(
-          "Plot is not active or prediction window has closed",
+          "Plot is not active or prediction window has closed. You cannot update predictions on closed plots.",
           HttpStatus.BAD_REQUEST
         );
       }
@@ -2303,6 +2359,34 @@ export class PlotService {
         }),
         this.prisma.plotPrediction.count({ where: { userId } }),
       ]);
+
+      // Recalculate and update status for plots if needed (auto-close when end date passed)
+      const currentTime = new Date();
+      for (const prediction of predictions) {
+        const plot = prediction.plot;
+        if (
+          plot.status !== PlotStatus.RESULTS_ANNOUNCED &&
+          plot.status !== (PlotStatus as any).PAUSED
+        ) {
+          const [closeHours, closeMinutes] = plot.closeEndTime
+            .split(":")
+            .map(Number);
+          const closeDateTime = new Date(plot.closeEndDate);
+          closeDateTime.setHours(closeHours, closeMinutes, 0, 0);
+
+          if (
+            currentTime > closeDateTime &&
+            plot.status !== (PlotStatus as any).CLOSED
+          ) {
+            // Update status to CLOSED in database
+            await this.prisma.plot.update({
+              where: { id: plot.id },
+              data: { status: (PlotStatus as any).CLOSED },
+            });
+            plot.status = (PlotStatus as any).CLOSED;
+          }
+        }
+      }
 
       // Sort question predictions by question order for each prediction
       predictions.forEach((prediction) => {
@@ -2537,6 +2621,33 @@ export class PlotService {
       // Apply pagination after sorting
       const paginatedPlots = sortedPlots.slice(skip, skip + limit);
       const total = orderedPlotIds.length;
+
+      // Recalculate and update status for plots if needed (auto-close when end date passed)
+      const currentTime = new Date();
+      for (const plot of paginatedPlots) {
+        if (
+          plot.status !== PlotStatus.RESULTS_ANNOUNCED &&
+          plot.status !== (PlotStatus as any).PAUSED
+        ) {
+          const [closeHours, closeMinutes] = plot.closeEndTime
+            .split(":")
+            .map(Number);
+          const closeDateTime = new Date(plot.closeEndDate);
+          closeDateTime.setHours(closeHours, closeMinutes, 0, 0);
+
+          if (
+            currentTime > closeDateTime &&
+            plot.status !== (PlotStatus as any).CLOSED
+          ) {
+            // Update status to CLOSED in database
+            await this.prisma.plot.update({
+              where: { id: plot.id },
+              data: { status: (PlotStatus as any).CLOSED },
+            });
+            plot.status = (PlotStatus as any).CLOSED;
+          }
+        }
+      }
 
       // Sort question predictions by question order for each plot prediction
       paginatedPlots.forEach((plot) => {
