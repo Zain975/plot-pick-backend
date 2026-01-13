@@ -2433,107 +2433,212 @@ export class PlotService {
     plotId: string
   ): Promise<any> {
     try {
-      // Find user's prediction for this plot
-      const prediction = await this.prisma.plotPrediction.findUnique({
-        where: {
-          userId_plotId: {
-            userId,
-            plotId,
-          },
-        },
+      // Fetch plot with same structure as getPlotDetailsForUser
+      const plot = await this.prisma.plot.findUnique({
+        where: { id: plotId },
         include: {
-          plot: {
+          show: {
             include: {
-              show: {
-                include: {
-                  plots: {
-                    select: {
-                      id: true,
-                      episodeNumber: true,
-                    },
-                    orderBy: { episodeNumber: "asc" },
-                  },
+              plots: {
+                select: {
+                  id: true,
+                  episodeNumber: true,
                 },
-              },
-              questions: {
-                include: {
-                  options: true,
-                  correctOption: true,
-                },
-                orderBy: { order: "asc" },
+                orderBy: { episodeNumber: "asc" },
               },
             },
           },
-          questionPredictions: {
+          questions: {
+            where: { isPaused: false },
             include: {
-              question: {
+              options: true,
+              correctOption: true, // Always include, will be null if not set
+            },
+            orderBy: { order: "asc" },
+          },
+          plotPredictions: {
+            where: { userId },
+            include: {
+              questionPredictions: {
                 include: {
-                  options: true,
-                  correctOption: true,
+                  question: true,
+                  option: true,
                 },
               },
-              option: true,
             },
           },
         },
       });
 
-      if (!prediction) {
+      if (!plot) {
+        throw new HttpException("Plot not found", HttpStatus.NOT_FOUND);
+      }
+
+      // Check if user has made a prediction
+      const userPrediction =
+        plot.plotPredictions && plot.plotPredictions.length > 0
+          ? plot.plotPredictions[0]
+          : null;
+
+      if (!userPrediction) {
         throw new HttpException(
           "You have not made a prediction on this plot",
           HttpStatus.NOT_FOUND
         );
       }
 
-      // Sort question predictions by question order
-      if (prediction.questionPredictions) {
-        prediction.questionPredictions.sort(
-          (a, b) => a.question.order - b.question.order
-        );
+      // Recalculate and update status if needed (auto-close when end date passed)
+      const currentTime = new Date();
+      if (
+        plot.status !== PlotStatus.RESULTS_ANNOUNCED &&
+        plot.status !== (PlotStatus as any).PAUSED
+      ) {
+        const [closeHours, closeMinutes] = plot.closeEndTime
+          .split(":")
+          .map(Number);
+        const closeDateTime = new Date(plot.closeEndDate);
+        closeDateTime.setHours(closeHours, closeMinutes, 0, 0);
+
+        if (
+          currentTime > closeDateTime &&
+          plot.status !== (PlotStatus as any).CLOSED
+        ) {
+          // Update status to CLOSED in database
+          await this.prisma.plot.update({
+            where: { id: plot.id },
+            data: { status: (PlotStatus as any).CLOSED },
+          });
+          plot.status = (PlotStatus as any).CLOSED;
+        }
       }
 
       // Build episode IDs object (episode1Id, episode2Id, etc.)
       const episodeIds: any = {};
-      if (prediction.plot.show.plots) {
-        for (const episode of prediction.plot.show.plots) {
+      if (plot.show.plots) {
+        for (const episode of plot.show.plots) {
           episodeIds[`episode${episode.episodeNumber}Id`] = episode.id;
         }
       }
 
       // Add episode IDs to show object
       const showWithEpisodes = {
-        ...prediction.plot.show,
+        ...plot.show,
         ...episodeIds,
       };
 
       // Check if plot is active and within time window
       const now = new Date();
       const isActive =
-        prediction.plot.status === PlotStatus.ACTIVE &&
-        prediction.plot.activeStartDate <= now &&
-        prediction.plot.closeEndDate >= now;
+        plot.status === PlotStatus.ACTIVE &&
+        plot.activeStartDate <= now &&
+        plot.closeEndDate >= now;
 
       // Get total number of predictions on this plot
       const totalPredictions = await this.prisma.plotPrediction.count({
         where: { plotId },
       });
 
+      // Get all question predictions for this plot to calculate percentages
+      const allQuestionPredictions =
+        await this.prisma.questionPrediction.findMany({
+          where: {
+            plotPrediction: {
+              plotId,
+            },
+          },
+          select: {
+            questionId: true,
+            optionId: true,
+          },
+        });
+
+      // Calculate option counts per question
+      const optionCountsByQuestion = new Map<string, Map<string, number>>();
+
+      // Initialize maps for each question
+      plot.questions.forEach((question) => {
+        optionCountsByQuestion.set(question.id, new Map<string, number>());
+        question.options.forEach((option) => {
+          optionCountsByQuestion.get(question.id)!.set(option.id, 0);
+        });
+      });
+
+      // Count predictions for each option
+      allQuestionPredictions.forEach((qp) => {
+        const questionMap = optionCountsByQuestion.get(qp.questionId);
+        if (questionMap) {
+          const currentCount = questionMap.get(qp.optionId) || 0;
+          questionMap.set(qp.optionId, currentCount + 1);
+        }
+      });
+
+      // Create a map of user's predicted options by question ID
+      const userPredictedOptions = new Map<string, any>();
+      if (userPrediction.questionPredictions) {
+        userPrediction.questionPredictions.forEach((qp: any) => {
+          userPredictedOptions.set(qp.questionId, qp.option);
+        });
+      }
+
+      // Calculate total predictions per question and percentages
+      const questionsWithPercentages = plot.questions.map((question) => {
+        const optionCounts =
+          optionCountsByQuestion.get(question.id) || new Map();
+        const totalQuestionPredictions = Array.from(
+          optionCounts.values()
+        ).reduce((sum, count) => sum + count, 0);
+
+        const userPredictedOption = userPredictedOptions.get(question.id);
+
+        const optionsWithPercentages = question.options.map((option) => {
+          const count = optionCounts.get(option.id) || 0;
+          const percentage =
+            totalQuestionPredictions > 0
+              ? Math.round((count / totalQuestionPredictions) * 100 * 100) / 100 // Round to 2 decimal places
+              : 0;
+
+          return {
+            ...option,
+            predictedPercentage: percentage,
+            predictedCount: count,
+            // Add user's predicted option flag
+            isUserPredicted: userPredictedOption?.id === option.id,
+          };
+        });
+
+        return {
+          ...question,
+          options: optionsWithPercentages,
+          totalPredictions: totalQuestionPredictions,
+          // Add correct option ID if available
+          correctOptionId: question.correctOptionId || null,
+          // Add user's predicted option details
+          userPredictedOption: userPredictedOption
+            ? {
+                id: userPredictedOption.id,
+                optionText: userPredictedOption.optionText,
+                order: userPredictedOption.order,
+              }
+            : null,
+        };
+      });
+
       return {
+        ...plot,
         show: showWithEpisodes,
-        plot: {
-          ...prediction.plot,
-          isActive,
-          canPredict:
-            isActive && prediction.plot.status !== PlotStatus.RESULTS_ANNOUNCED,
-          totalPredictions,
+        questions: questionsWithPercentages,
+        isActive,
+        canPredict:
+          isActive &&
+          plot.status !== PlotStatus.RESULTS_ANNOUNCED &&
+          plot.status !== (PlotStatus as any).CLOSED,
+        userPrediction: {
+          id: userPrediction.id,
+          predictedAmount: userPrediction.predictedAmount,
+          createdAt: userPrediction.createdAt,
+          updatedAt: userPrediction.updatedAt,
         },
-        prediction: {
-          id: prediction.id,
-          predictedAmount: prediction.predictedAmount,
-          createdAt: prediction.createdAt,
-          updatedAt: prediction.updatedAt,
-          questionPredictions: prediction.questionPredictions,
-        },
+        totalPredictions,
       };
     } catch (error: any) {
       if (error instanceof HttpException) {
