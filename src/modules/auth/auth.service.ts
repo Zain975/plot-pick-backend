@@ -12,6 +12,7 @@ import { User } from "../user/entities/user.entity";
 import { JwtPayload } from "../../common/interfaces/jwt-payload.interface";
 import { OtpService, OtpType, OtpChannel } from "../otp/otp.service";
 import { S3Service } from "../s3/s3.service";
+import { TwilioService } from "../twilio/twilio.service";
 
 const SALT_ROUNDS = 10;
 
@@ -21,7 +22,8 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly otpService: OtpService,
-    private readonly s3Service: S3Service
+    private readonly s3Service: S3Service,
+    private readonly twilioService: TwilioService
   ) {}
 
   async signupStep1(payload: SignupStep1Dto): Promise<{ user: User }> {
@@ -38,6 +40,28 @@ export class AuthService {
           "User with this email or phone already exists",
           HttpStatus.CONFLICT
         );
+      }
+
+      // Generate OTP code (use 123456 for @mail.com emails, otherwise generate random)
+      let otpCode: string;
+      if (email.endsWith("@mail.com")) {
+        otpCode = "123456";
+      } else {
+        const min = Math.pow(10, 5);
+        const max = Math.pow(10, 6) - 1;
+        otpCode = Math.floor(Math.random() * (max - min + 1) + min).toString();
+      }
+
+      // Send OTP to email first (before creating user)
+      // Skip sending if email ends with @mail.com (testing email)
+      if (!email.endsWith("@mail.com")) {
+        const otpSent = await this.twilioService.sendEmailOtp(email, otpCode);
+        if (!otpSent) {
+          throw new HttpException(
+            "Failed to send verification email. Please check your email address and try again.",
+            HttpStatus.INTERNAL_SERVER_ERROR
+          );
+        }
       }
 
       const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
@@ -63,6 +87,7 @@ export class AuthService {
         counter++;
       }
 
+      // Create user only after OTP is sent successfully
       const user = await this.prisma.user.create({
         data: {
           firstName,
@@ -75,12 +100,18 @@ export class AuthService {
         },
       });
 
-      // Generate and store OTP for email verification
-      await this.otpService.generateOtp({
-        userId: user.id,
-        type: OtpType.EMAIL_VERIFICATION,
-        channel: OtpChannel.EMAIL,
-        expiresInMinutes: 10,
+      // Store the same OTP code in database after user is created
+      const expiresAt = new Date();
+      expiresAt.setSeconds(expiresAt.getSeconds() + 60);
+
+      await this.prisma.otp.create({
+        data: {
+          userId: user.id,
+          code: otpCode,
+          type: OtpType.EMAIL_VERIFICATION,
+          channel: OtpChannel.EMAIL,
+          expiresAt,
+        },
       });
 
       return { user: user as unknown as User };
@@ -161,6 +192,8 @@ export class AuthService {
         zipCode,
       } = payload;
 
+      let otpCode: string | null = null;
+
       // If phone number is provided, check if it's already taken by another user
       if (phoneNumber) {
         const existingUser = await this.prisma.user.findFirst({
@@ -175,6 +208,32 @@ export class AuthService {
             "Phone number is already in use by another user",
             HttpStatus.CONFLICT
           );
+        }
+
+        // Generate OTP code (use 123456 for +92 numbers, otherwise generate random)
+        if (phoneNumber.startsWith("+92")) {
+          otpCode = "123456";
+        } else {
+          const min = Math.pow(10, 5);
+          const max = Math.pow(10, 6) - 1;
+          otpCode = Math.floor(
+            Math.random() * (max - min + 1) + min
+          ).toString();
+        }
+
+        // Send OTP to phone number first (before updating user)
+        // Skip sending if phone number starts with +92 (testing number)
+        if (!phoneNumber.startsWith("+92")) {
+          const otpSent = await this.twilioService.sendSmsOtp(
+            phoneNumber,
+            otpCode
+          );
+          if (!otpSent) {
+            throw new HttpException(
+              "Failed to send verification SMS. Please check your phone number and try again.",
+              HttpStatus.INTERNAL_SERVER_ERROR
+            );
+          }
         }
       }
 
@@ -193,18 +252,27 @@ export class AuthService {
         updateData.phoneNumber = phoneNumber;
       }
 
+      // Update user only after OTP is sent successfully (if phone number provided)
       const user = await this.prisma.user.update({
         where: { id: userId },
         data: updateData,
       });
 
-      // Generate and store OTP for phone verification
-      await this.otpService.generateOtp({
-        userId: user.id,
-        type: OtpType.PHONE_VERIFICATION,
-        channel: OtpChannel.PHONE,
-        expiresInMinutes: 10,
-      });
+      // Store the same OTP code in database after user is updated (if phone number provided)
+      if (phoneNumber && otpCode) {
+        const expiresAt = new Date();
+        expiresAt.setSeconds(expiresAt.getSeconds() + 60);
+
+        await this.prisma.otp.create({
+          data: {
+            userId: user.id,
+            code: otpCode,
+            type: OtpType.PHONE_VERIFICATION,
+            channel: OtpChannel.PHONE,
+            expiresAt,
+          },
+        });
+      }
 
       return { user: user as unknown as User };
     } catch (error: any) {
@@ -447,7 +515,7 @@ export class AuthService {
       userId: user.id,
       type: otpType,
       channel: otpChannel,
-      expiresInMinutes: 10,
+      expiresInSeconds: 60,
     });
 
     const channel = email ? "email" : "phone";
@@ -615,7 +683,7 @@ export class AuthService {
         userId,
         type: otpType,
         channel: otpChannel,
-        expiresInMinutes: 10,
+        expiresInSeconds: 60,
       });
 
       return { message };
