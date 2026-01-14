@@ -1,5 +1,6 @@
-import { readFileSync } from "fs";
-import { join } from "path";
+import * as Handlebars from "handlebars";
+import * as fs from "fs";
+import * as path from "path";
 
 export enum EmailTemplateType {
   OTP_VERIFICATION = "otp-verification",
@@ -12,41 +13,50 @@ interface TemplateVariables {
 }
 
 export class TemplateHelper {
+  private static templatesCache: Map<
+    EmailTemplateType,
+    HandlebarsTemplateDelegate<any>
+  > = new Map();
+
   /**
-   * Get templates directory path
-   * Works in both development and production
-   * Since template.helper.ts is inside the templates folder, __dirname is the templates directory
+   * Load and compile a Handlebars template
+   * Uses __dirname to resolve template path relative to this file's location
+   * Works in both development (src/) and production (dist/)
    */
-  private static getTemplatesDir(): string {
-    // __dirname points to the templates directory (where this file is located)
-    // This works in both development and production if templates are copied to dist
-    return __dirname;
+  private static loadTemplate(
+    templateType: EmailTemplateType
+  ): HandlebarsTemplateDelegate<any> {
+    // Check cache first
+    if (this.templatesCache.has(templateType)) {
+      return this.templatesCache.get(templateType)!;
+    }
+
+    try {
+      const templatePath = path.join(__dirname, `${templateType}.hbs`);
+      const source = fs.readFileSync(templatePath, "utf8");
+      const compiledTemplate = Handlebars.compile(source);
+
+      // Cache the compiled template
+      this.templatesCache.set(templateType, compiledTemplate);
+
+      return compiledTemplate;
+    } catch (error: any) {
+      console.error("Error in loadTemplate:", error);
+      throw new Error(
+        `Failed to load template ${templateType}: ${error.message}`
+      );
+    }
   }
 
   /**
-   * Load and render an email template with variables
+   * Render an email template with variables using Handlebars
    */
   static renderTemplate(
     templateType: EmailTemplateType,
     variables: TemplateVariables
   ): string {
-    try {
-      const templatesDir = this.getTemplatesDir();
-      const templatePath = join(templatesDir, `${templateType}.html`);
-      let template = readFileSync(templatePath, "utf-8");
-
-      // Replace template variables
-      Object.keys(variables).forEach((key) => {
-        const regex = new RegExp(`{{${key}}}`, "g");
-        template = template.replace(regex, String(variables[key]));
-      });
-
-      return template;
-    } catch (error: any) {
-      throw new Error(
-        `Failed to load template ${templateType}: ${error.message}`
-      );
-    }
+    const template = this.loadTemplate(templateType);
+    return template(variables);
   }
 
   /**
