@@ -10,6 +10,7 @@ import { OtpModule } from "./modules/otp/otp.module";
 import { S3Module } from "./modules/s3/s3.module";
 import { CommunityModule } from "./modules/community/community.module";
 import { PlotModule } from "./modules/plot/plot.module";
+import { TwilioModule } from "./modules/twilio/twilio.module";
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { PlotModule } from "./modules/plot/plot.module";
     }),
     TerminusModule,
     PrismaModule,
+    TwilioModule,
     HealthModule,
     UserModule,
     AuthModule,

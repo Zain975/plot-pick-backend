@@ -85,7 +85,7 @@ export class AdminService {
         adminId: admin.id,
         type: OtpType.LOGIN_EMAIL,
         channel: OtpChannel.EMAIL,
-        expiresInMinutes: 10,
+        expiresInSeconds: 60,
       });
 
       return { adminId: admin.id };
@@ -170,7 +170,7 @@ export class AdminService {
         adminId,
         type: OtpType.LOGIN_EMAIL,
         channel: OtpChannel.EMAIL,
-        expiresInMinutes: 10,
+        expiresInSeconds: 60,
       });
 
       return { message: "Login OTP has been resent to your email" };

@@ -8,6 +8,7 @@ import { AuthController } from "./auth.controller";
 import { JwtStrategy } from "../../common/strategies/jwt.strategy";
 import { OtpModule } from "../otp/otp.module";
 import { S3Module } from "../s3/s3.module";
+import { TwilioModule } from "../twilio/twilio.module";
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { S3Module } from "../s3/s3.module";
     PassportModule,
     OtpModule,
     S3Module,
+    TwilioModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({
