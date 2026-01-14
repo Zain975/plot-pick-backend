@@ -38,6 +38,10 @@ RUN npx prisma generate
 # Build the application
 RUN npm run build
 
+# Ensure templates are copied (fallback if copyfiles didn't work)
+RUN mkdir -p dist/modules/twilio/templates && \
+    cp -r src/modules/twilio/templates/*.hbs dist/modules/twilio/templates/ 2>/dev/null || true
+
 # Stage 3: Production
 FROM node:20-alpine AS production
 
